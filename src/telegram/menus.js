@@ -85,6 +85,7 @@ export const strategyNumericLabels = {
   max_top20_holder_percent: 'maximum top holder percent',
   max_bundle_single_holder_percent: 'max % single largest holder (0=off; anti-cartel)',
   max_bundle_top4_combined_percent: 'max combined % top 4 holders (0=off; anti-cartel)',
+  duplicate_ticker_og_window_ms: 'reject if same Pump ticker graduated earlier within this many ms (0=off)',
   min_saved_wallet_holders: 'minimum saved-wallet holders',
   max_ath_distance_pct: 'maximum ATH distance percent (-40 = 40% below ATH, 0 = off)',
   min_source_count: 'minimum source count',

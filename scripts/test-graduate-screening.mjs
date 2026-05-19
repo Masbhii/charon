@@ -20,7 +20,7 @@ const fullLimit = fullIdx >= 0 ? Math.max(1, Number(args[fullIdx + 1]) || 8) : 8
 const { initDb } = await import('../src/db/connection.js');
 const { strategyById, setActiveStrategy, activeStrategy } = await import('../src/db/settings.js');
 const { fetchGraduatedCoins, graduated } = await import('../src/signals/graduated.js');
-const { buildCandidate, filterCandidate } = await import('../src/pipeline/candidateBuilder.js');
+const { buildCandidate, filterCandidate, duplicateTickerOgFailure } = await import('../src/pipeline/candidateBuilder.js');
 const { now } = await import('../src/utils.js');
 
 function fmtAge(ms) {
@@ -57,6 +57,8 @@ function quickPrefilter(coin, strat) {
   if (strat.max_mcap_usd > 0 && mcap && mcap > strat.max_mcap_usd) {
     failures.push(`mcap pump API ${fmtUsd(mcap)} > max ${fmtUsd(strat.max_mcap_usd)}`);
   }
+  const dupMsg = duplicateTickerOgFailure(coin.coinMint, coin, strat.duplicate_ticker_og_window_ms, graduated);
+  if (dupMsg) failures.push(dupMsg);
   return { passed: failures.length === 0, failures, ageMs, mcap };
 }
 

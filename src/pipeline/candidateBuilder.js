@@ -5,6 +5,7 @@ import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, volum
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { fetchTwitterNarrative } from '../enrichment/twitter.js';
 import { gmgnLink } from '../format.js';
+import { graduated } from '../signals/graduated.js';
 
 export function buildFeeSnapshot(fee, signature) {
   return {
@@ -25,6 +26,29 @@ export function signalLabel(signals = {}) {
     signals.hasGraduated ? 'graduated' : null,
     signals.hasTrending ? 'trending' : null,
   ].filter(Boolean).join(' + ') || signals.route || 'unknown';
+}
+
+/**
+ * If another mint shares this Pump ticker and graduated strictly earlier within windowMs, return failure reason (copy/vamp heuristic).
+ */
+export function duplicateTickerOgFailure(mint, graduationRow, windowMs, graduatedMap, fallbackTicker = '') {
+  if (!windowMs || !mint || !graduationRow) return null;
+  const myTicker = String(graduationRow.ticker ?? fallbackTicker ?? '').trim().toUpperCase();
+  const myG = Number(graduationRow.graduationDate || 0);
+  if (!myTicker || !myG) return null;
+  for (const coin of graduatedMap.values()) {
+    const otherMint = coin.coinMint;
+    if (!otherMint || otherMint === mint) continue;
+    const otherTicker = String(coin.ticker || '').trim().toUpperCase();
+    if (otherTicker !== myTicker) continue;
+    const otherG = Number(coin.graduationDate || 0);
+    if (!(otherG > 0 && otherG < myG)) continue;
+    const deltaMs = myG - otherG;
+    if (deltaMs > 0 && deltaMs <= windowMs) {
+      return `duplicate ticker: ${myTicker} has earlier graduate (${Math.round(deltaMs / 1000)}s before, same window)`;
+    }
+  }
+  return null;
 }
 
 export function filterCandidate(candidate) {
@@ -62,6 +86,15 @@ export function filterCandidate(candidate) {
   if (strat.max_mcap_usd > 0 && Number.isFinite(mcap) && mcap > strat.max_mcap_usd) {
     failures.push(`market cap max: ${mcap} > ${strat.max_mcap_usd}`);
   }
+
+  const dupMsg = duplicateTickerOgFailure(
+    candidate.token.mint,
+    candidate.graduation,
+    strat.duplicate_ticker_og_window_ms,
+    graduated,
+    candidate.token.symbol,
+  );
+  if (dupMsg) failures.push(dupMsg);
 
   // Graduate age gate
   if (strat.min_graduated_age_ms > 0 || strat.max_graduated_age_ms > 0) {
