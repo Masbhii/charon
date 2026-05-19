@@ -387,6 +387,8 @@ export function initDb() {
     min_gmgn_total_fee_sol: 0,
     min_holders: 0,
     max_top20_holder_percent: 100,
+    max_bundle_single_holder_percent: 24,
+    max_bundle_top4_combined_percent: 70,
     min_saved_wallet_holders: 0,
     max_ath_distance_pct: 0,
     min_graduated_volume_usd: 0,

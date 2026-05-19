@@ -128,16 +128,18 @@ async function fetchJupiterHolders(mint) {
       };
     });
     const top20 = mapped.slice(0, 20);
+    const top4Combined = mapped.slice(0, 4).reduce((sum, holder) => sum + Number(holder.percent || 0), 0);
     return {
       count: holders.length,
       holders: mapped,
       top20,
       top20Percent: top20.reduce((sum, holder) => sum + Number(holder.percent || 0), 0),
       maxHolderPercent: Math.max(0, ...top20.map(holder => Number(holder.percent || 0))),
+      top4HolderCombinedPercent: top4Combined,
     };
   } catch (err) {
     console.log(`[holders] ${mint.slice(0, 8)}... ${err.response?.status || ''} ${err.message}`);
-    return { count: 0, holders: [], top20: [], top20Percent: null, maxHolderPercent: null };
+    return { count: 0, holders: [], top20: [], top20Percent: null, maxHolderPercent: null, top4HolderCombinedPercent: null };
   }
 }
 

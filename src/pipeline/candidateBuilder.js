@@ -35,6 +35,8 @@ export function filterCandidate(candidate) {
   const gradVolume = candidate.metrics.graduatedVolumeUsd;
   const vol1h = candidate.metrics.volume1hUsd;
   const maxHolder = candidate.holders.maxHolderPercent;
+  const rawTop4 = candidate.holders?.top4HolderCombinedPercent;
+  const top4Combined = rawTop4 == null ? null : Number(rawTop4);
   const savedCount = candidate.savedWalletExposure.holderCount;
   const feeSol = candidate.feeClaim?.distributedSol;
   const holderCount = Number(candidate.metrics.holderCount || 0);
@@ -106,9 +108,18 @@ export function filterCandidate(candidate) {
     failures.push(`holders: ${holderCount} < ${strat.min_holders}`);
   }
 
-  // Top holder concentration
+  // Top holder concentration (legacy single-wallet cap)
   if (strat.max_top20_holder_percent < 100 && Number.isFinite(maxHolder) && maxHolder > strat.max_top20_holder_percent) {
     failures.push(`max top holder: ${maxHolder}% > ${strat.max_top20_holder_percent}%`);
+  }
+
+  // Extreme bundler / supply cartel (Jupiter holder list): not too strict — catches ~4×20% style dumps
+  if (strat.max_bundle_single_holder_percent > 0 && Number.isFinite(maxHolder) && maxHolder > strat.max_bundle_single_holder_percent) {
+    failures.push(`bundle: largest holder ${maxHolder.toFixed(1)}% > ${strat.max_bundle_single_holder_percent}%`);
+  }
+  if (strat.max_bundle_top4_combined_percent > 0 && top4Combined != null && Number.isFinite(top4Combined)
+    && top4Combined > strat.max_bundle_top4_combined_percent) {
+    failures.push(`bundle: top4 combined ${top4Combined.toFixed(1)}% > ${strat.max_bundle_top4_combined_percent}%`);
   }
 
   // Saved wallet holders
