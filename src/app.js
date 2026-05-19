@@ -1,5 +1,5 @@
 import { setDefaultResultOrder } from 'node:dns';
-import { APP_NAME, SIGNAL_SERVER_URL, SIGNAL_POLL_MS, GRADUATED_POLL_MS, TRENDING_POLL_MS, POSITION_CHECK_MS, validateConfig } from './config.js';
+import { APP_NAME, SIGNAL_SERVER_URL, SIGNAL_POLL_MS, GRADUATED_POLL_MS, TRENDING_POLL_MS, POSITION_CHECK_MS, GRADUATE_IMMEDIATE_ENABLED, validateConfig } from './config.js';
 import { initDb } from './db/connection.js';
 import { initLiveExecution } from './liveExecutor.js';
 import { setupTelegram } from './telegram/commands.js';
@@ -29,6 +29,12 @@ export async function startCharon() {
 
     await fetchServerSignals().catch(error => console.log(`[server] initial fetch failed: ${error.message}`));
     setInterval(() => trackServer(() => fetchServerSignals()), SIGNAL_POLL_MS);
+
+    if (GRADUATE_IMMEDIATE_ENABLED) {
+      const { startWebsocket } = await import('./signals/feeClaim.js');
+      startWebsocket();
+      console.log('[bot] Graduate Immediate: WebSocket listener aktif');
+    }
 
     // Price monitor for dip buy strategy
     const { monitorPriceAlerts, cleanupAlerts } = await import('./signals/priceMonitor.js');

@@ -34,6 +34,12 @@ export function filtersText() {
     `Max mcap: ${strat.max_mcap_usd > 0 ? fmtUsd(strat.max_mcap_usd) : 'off'}`,
     `Min trading fees: ${fmtSol(strat.min_gmgn_total_fee_sol)} SOL`,
     `Min grad volume: ${fmtUsd(strat.min_graduated_volume_usd)}`,
+    strat.min_volume_1h_usd > 0 || strat.max_volume_1h_usd > 0
+      ? `1h vol (Jupiter): ${fmtUsd(strat.min_volume_1h_usd || 0)} – ${strat.max_volume_1h_usd > 0 ? fmtUsd(strat.max_volume_1h_usd) : '∞'}`
+      : null,
+    strat.min_graduated_age_ms > 0 || strat.max_graduated_age_ms > 0
+      ? `Grad age: ${strat.min_graduated_age_ms / 1000}s – ${strat.max_graduated_age_ms > 0 ? `${strat.max_graduated_age_ms / 1000}s` : '∞'}`
+      : null,
     `Min holders: ${strat.min_holders || 'off'}`,
     `Max holder: ${strat.max_top20_holder_percent < 100 ? fmtPct(strat.max_top20_holder_percent) : 'off'}`,
     `Min saved holders: ${strat.min_saved_wallet_holders || 'off'}`,
@@ -71,6 +77,10 @@ export const strategyNumericLabels = {
   max_mcap_usd: 'maximum mcap USD',
   min_gmgn_total_fee_sol: 'minimum total trading fees SOL (GMGN)',
   min_graduated_volume_usd: 'minimum graduated volume USD',
+  min_graduated_age_ms: 'minimum age after graduation (ms)',
+  max_graduated_age_ms: 'maximum age after graduation (ms)',
+  min_volume_1h_usd: 'minimum 1h volume USD (Jupiter stats1h)',
+  max_volume_1h_usd: 'maximum 1h volume USD (Jupiter stats1h)',
   min_holders: 'minimum holders',
   max_top20_holder_percent: 'maximum top holder percent',
   min_saved_wallet_holders: 'minimum saved-wallet holders',

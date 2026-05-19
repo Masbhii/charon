@@ -3,7 +3,7 @@ import { numSetting, boolSetting, strategyById } from '../db/settings.js';
 import { db } from '../db/connection.js';
 import { firstPositiveNumber, marketCapFromGmgn, tokenPriceFromGmgn } from '../utils.js';
 import { fetchGmgnTokenInfo } from '../enrichment/gmgn.js';
-import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, fetchJupiterWalletPnl } from '../enrichment/jupiter.js';
+import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, fetchJupiterWalletPnl, volume1hUsdFromJupiterAsset } from '../enrichment/jupiter.js';
 import { liveWalletPubkey } from '../liveExecutor.js';
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { filterCandidate } from '../pipeline/candidateBuilder.js';
@@ -62,6 +62,7 @@ export async function refreshCandidateForExecution(row) {
       ...candidate.metrics,
       priceUsd,
       marketCapUsd,
+      volume1hUsd: volume1hUsdFromJupiterAsset(asset) ?? candidate.metrics?.volume1hUsd ?? null,
       liquidityUsd: Number(gmgn?.liquidity ?? asset?.liquidity ?? selectedTrending?.liquidity ?? candidate.metrics?.liquidityUsd ?? 0),
       holderCount: Number(gmgn?.holder_count ?? asset?.holderCount ?? selectedTrending?.holder_count ?? candidate.metrics?.holderCount ?? 0),
       gmgnTotalFeesSol: Number(gmgn?.total_fee ?? asset?.fees ?? candidate.metrics?.gmgnTotalFeesSol ?? 0),

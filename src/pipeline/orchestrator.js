@@ -1,3 +1,4 @@
+import { SKIP_FRESH_REENRICHMENT_MS } from '../config.js';
 import { now, pruneSeen } from '../utils.js';
 import { numSetting, boolSetting } from '../db/settings.js';
 import { upsertCandidate, updateCandidateStatus, recentEligibleCandidates, candidateById } from '../db/candidates.js';
@@ -123,7 +124,15 @@ export async function processCandidateFromSignals(signals) {
 
 export async function handleApprovedBuy(selectedRow, decision, batchId, rows = [], triggerCandidateId = null) {
   const mode = tradingMode();
-  const freshSelectedRow = await refreshCandidateForExecution(selectedRow);
+  const candidateAge = now() - (selectedRow.candidate?.builtAtMs ?? 0);
+  const isFresh = candidateAge > 0 && candidateAge < SKIP_FRESH_REENRICHMENT_MS;
+  let freshSelectedRow;
+  if (isFresh) {
+    freshSelectedRow = selectedRow;
+    console.log(`[agent] skipping re-enrichment (candidate ${candidateAge}ms old)`);
+  } else {
+    freshSelectedRow = await refreshCandidateForExecution(selectedRow);
+  }
   const executionRows = rows.map(row => row.id === freshSelectedRow.id ? freshSelectedRow : row);
   if (!freshSelectedRow.candidate.filters?.passed) {
     updateCandidateStatus(freshSelectedRow.id, 'stale_rejected');

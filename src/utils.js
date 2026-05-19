@@ -1,3 +1,5 @@
+import bs58 from 'bs58';
+
 export function now() {
   return Date.now();
 }
@@ -74,6 +76,15 @@ export function base58Encode(bytes) {
 
 export function readPubkey(buf, offset) {
   return base58Encode(buf.subarray(offset, offset + 32));
+}
+
+export function readPubkeyFromBuffer(buf, offset) {
+  if (!buf || buf.length < offset + 32) return null;
+  try {
+    return bs58.encode(buf.slice(offset, offset + 32));
+  } catch {
+    return null;
+  }
 }
 
 export function readU64(buf, offset) {

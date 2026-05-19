@@ -7,6 +7,9 @@ export const DB_PATH = process.env.DB_PATH || './charon.sqlite';
 export const PUMP_PROGRAM = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 export const PUMP_AMM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
 export const DISC_DIST_FEES = Buffer.from('a537817004b3ca28', 'hex');
+// Pump AMM CreatePool discriminator (8 bytes pertama)
+// VERIFY via Solscan
+export const DISC_CREATE_POOL = Buffer.from('afaf6d1f0d989bed', 'hex');
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 export const SOL_MINT = 'So11111111111111111111111111111111111111111';
 
@@ -28,6 +31,9 @@ export const LLM_API_KEY = process.env.LLM_API_KEY || '';
 export const LLM_MODEL = process.env.LLM_MODEL || 'MiniMax-M2.7';
 
 export const GRADUATED_POLL_MS = Number(process.env.GRADUATED_POLL_MS || 30_000);
+export const TWITTER_ENABLED = process.env.TWITTER_ENABLED !== 'false';
+export const SKIP_FRESH_REENRICHMENT_MS = Number(process.env.SKIP_FRESH_REENRICHMENT_MS || 8_000);
+export const GRADUATE_IMMEDIATE_ENABLED = process.env.GRADUATE_IMMEDIATE_ENABLED === 'true';
 export const GRADUATED_LOOKBACK_MS = Number(process.env.GRADUATED_LOOKBACK_MS || 2 * 60 * 60 * 1000);
 export const TRENDING_POLL_MS = Number(process.env.TRENDING_POLL_MS || 60_000);
 export const TRENDING_LOOKBACK_MS = Number(process.env.TRENDING_LOOKBACK_MS || 10 * 60 * 1000);

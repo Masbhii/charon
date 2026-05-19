@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { TWITTER_ENABLED } from '../config.js';
 import { now } from '../utils.js';
 
 function extractTweetUrl(input) {
@@ -79,6 +80,7 @@ function viralityScore(metrics) {
 }
 
 async function fetchTwitterNarrative(graduatedCoin, gmgn) {
+  if (!TWITTER_ENABLED) return null;
   const url = extractTweetUrl(graduatedCoin) || extractTweetUrl(gmgn);
   if (!url) return null;
   try {

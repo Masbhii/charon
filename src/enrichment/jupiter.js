@@ -22,6 +22,17 @@ function jupiterStatsForInterval(row, interval) {
   return row?.[key] || row?.stats5m || row?.stats1h || row?.stats24h || {};
 }
 
+/** Approximate 1h traded notional (USD) from Jupiter asset search row. */
+export function volume1hUsdFromJupiterAsset(asset) {
+  if (!asset) return null;
+  const s = asset.stats1h || asset.stats_1h;
+  if (!s || typeof s !== 'object') return null;
+  const buy = Number(s.buyVolume ?? 0);
+  const sell = Number(s.sellVolume ?? 0);
+  const sum = buy + sell;
+  return Number.isFinite(sum) && sum > 0 ? sum : null;
+}
+
 function normalizeJupiterTrendingRow(row, interval, rank) {
   const stats = jupiterStatsForInterval(row, interval);
   const buyVolume = Number(stats.buyVolume ?? 0);

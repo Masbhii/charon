@@ -90,6 +90,10 @@ export function createLivePosition(candidateId, candidate, decision, swap, reaso
   const trailingEnabled = (strat.trailing_enabled ?? boolSetting('default_trailing_enabled', true)) ? 1 : 0;
   const trailingPercent = strat.trailing_percent ?? numSetting('default_trailing_percent', 20);
 
+  if (swap?.outputAmount == null) {
+    throw new Error('Cannot create live position: token_amount_raw is null');
+  }
+
   return db.transaction(() => {
     const existing = db.prepare(`
       SELECT id FROM dry_run_positions WHERE mint = ? AND status = 'open' LIMIT 1

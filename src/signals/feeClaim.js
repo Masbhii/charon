@@ -1,6 +1,13 @@
 import WebSocket from 'ws';
-import { PUMP_PROGRAM, PUMP_AMM, DISC_DIST_FEES, SOLANA_WS_URL } from '../config.js';
-import { now, pruneSeen, lamToSol, discMatch, parseDistFees } from '../utils.js';
+import {
+  PUMP_PROGRAM,
+  PUMP_AMM,
+  DISC_DIST_FEES,
+  DISC_CREATE_POOL,
+  GRADUATE_IMMEDIATE_ENABLED,
+  SOLANA_WS_URL,
+} from '../config.js';
+import { now, pruneSeen, lamToSol, discMatch, parseDistFees, readPubkeyFromBuffer } from '../utils.js';
 import { numSetting, boolSetting } from '../db/settings.js';
 import { storeSignalEvent } from './trending.js';
 import { graduated } from './graduated.js';
@@ -8,10 +15,50 @@ import { trending } from './trending.js';
 import { buildFeeSnapshot } from '../pipeline/candidateBuilder.js';
 
 export const seenFeeClaims = new Map();
+export const seenMigrations = new Map();
 let candidateHandler = null;
 
 export function setCandidateHandler(fn) {
   candidateHandler = fn;
+}
+
+export async function handleMigrateEvent(data, signature) {
+  if (!GRADUATE_IMMEDIATE_ENABLED) return;
+
+  let mint = readPubkeyFromBuffer(data, 8);
+  if (!mint) mint = readPubkeyFromBuffer(data, 32);
+  if (!mint) mint = readPubkeyFromBuffer(data, 64);
+  if (!mint) {
+    console.log(`[migrate] Could not parse mint from sig ${signature?.slice(0, 8) || '???'}...`);
+    return;
+  }
+
+  pruneSeen(seenMigrations, 10 * 60_000);
+  const dedupeKey = `migrate:${mint}`;
+  if (seenMigrations.has(dedupeKey)) return;
+  seenMigrations.set(dedupeKey, now());
+
+  console.log(`[migrate] Pool created: ${mint.slice(0, 8)}... sig=${signature?.slice(0, 8) || '???'}...`);
+
+  if (!graduated.has(mint)) {
+    graduated.set(mint, {
+      coinMint: mint,
+      graduationDate: now(),
+      seenAt: now(),
+      source: 'ws_migrate_event',
+    });
+  }
+
+  if (candidateHandler) {
+    await candidateHandler({
+      mint,
+      fee: null,
+      signature,
+      graduatedCoin: graduated.get(mint),
+      trendingToken: null,
+      route: 'migrate_immediate',
+    });
+  }
 }
 
 export async function handleFeeClaim(fee, signature) {
@@ -54,11 +101,22 @@ async function processLog(logInfo) {
     } catch {
       continue;
     }
-    if (data.length < 8 || !discMatch(data, DISC_DIST_FEES)) continue;
-    try {
-      await handleFeeClaim(parseDistFees(data), signature);
-    } catch (error) {
-      console.log(`[fee] parse/alert failed: ${error.message}`);
+    if (data.length < 8) continue;
+
+    if (discMatch(data, DISC_DIST_FEES)) {
+      try {
+        await handleFeeClaim(parseDistFees(data), signature);
+      } catch (error) {
+        console.log(`[fee] parse/alert failed: ${error.message}`);
+      }
+    }
+
+    if (GRADUATE_IMMEDIATE_ENABLED && discMatch(data, DISC_CREATE_POOL)) {
+      try {
+        await handleMigrateEvent(data, signature);
+      } catch (e) {
+        console.log(`[migrate] handler error: ${e.message}`);
+      }
     }
   }
 }

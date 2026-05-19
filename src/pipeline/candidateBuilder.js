@@ -1,7 +1,7 @@
 import { now, firstPositiveNumber, marketCapFromGmgn, tokenPriceFromGmgn, lamToSol } from '../utils.js';
 import { activeStrategy } from '../db/settings.js';
 import { fetchGmgnTokenInfo } from '../enrichment/gmgn.js';
-import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext } from '../enrichment/jupiter.js';
+import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, volume1hUsdFromJupiterAsset } from '../enrichment/jupiter.js';
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { fetchTwitterNarrative } from '../enrichment/twitter.js';
 import { gmgnLink } from '../format.js';
@@ -33,6 +33,7 @@ export function filterCandidate(candidate) {
   const mcap = candidate.metrics.marketCapUsd;
   const totalFees = candidate.metrics.gmgnTotalFeesSol;
   const gradVolume = candidate.metrics.graduatedVolumeUsd;
+  const vol1h = candidate.metrics.volume1hUsd;
   const maxHolder = candidate.holders.maxHolderPercent;
   const savedCount = candidate.savedWalletExposure.holderCount;
   const feeSol = candidate.feeClaim?.distributedSol;
@@ -60,6 +61,20 @@ export function filterCandidate(candidate) {
     failures.push(`market cap max: ${mcap} > ${strat.max_mcap_usd}`);
   }
 
+  // Graduate age gate
+  if (strat.min_graduated_age_ms > 0 || strat.max_graduated_age_ms > 0) {
+    const gradDate = Number(candidate.graduation?.graduationDate || 0);
+    if (gradDate > 0) {
+      const ageMs = now() - gradDate;
+      if (strat.min_graduated_age_ms > 0 && ageMs < strat.min_graduated_age_ms) {
+        failures.push(`token too young (${Math.round(ageMs / 1000)}s < ${Math.round(strat.min_graduated_age_ms / 1000)}s)`);
+      }
+      if (strat.max_graduated_age_ms > 0 && ageMs > strat.max_graduated_age_ms) {
+        failures.push(`token too old (${Math.round(ageMs / 1000)}s > ${Math.round(strat.max_graduated_age_ms / 1000)}s)`);
+      }
+    }
+  }
+
   // GMGN fees — only enforce when GMGN data is available; Jupiter has no equivalent
   if (strat.min_gmgn_total_fee_sol > 0 && candidate.gmgn !== null && totalFees < strat.min_gmgn_total_fee_sol) {
     failures.push(`GMGN total fees: ${totalFees} < ${strat.min_gmgn_total_fee_sol}`);
@@ -68,6 +83,22 @@ export function filterCandidate(candidate) {
   // Graduated volume — only enforce when the token actually has graduated data
   if (strat.min_graduated_volume_usd > 0 && candidate.graduation && gradVolume < strat.min_graduated_volume_usd) {
     failures.push(`graduated volume: ${gradVolume} < ${strat.min_graduated_volume_usd}`);
+  }
+
+  // 1h volume (Jupiter stats1h — aligns with GMGN Trench "1h Vol" style gates)
+  if (strat.min_volume_1h_usd > 0 || strat.max_volume_1h_usd > 0) {
+    if (!Number.isFinite(vol1h) || vol1h == null) {
+      if (strat.min_volume_1h_usd > 0) {
+        failures.push('1h volume: unavailable (Jupiter stats1h missing)');
+      }
+    } else {
+      if (strat.min_volume_1h_usd > 0 && vol1h < strat.min_volume_1h_usd) {
+        failures.push(`1h volume: ${Math.round(vol1h)} < ${strat.min_volume_1h_usd}`);
+      }
+      if (strat.max_volume_1h_usd > 0 && vol1h > strat.max_volume_1h_usd) {
+        failures.push(`1h volume: ${Math.round(vol1h)} > ${strat.max_volume_1h_usd}`);
+      }
+    }
   }
 
   // Holder count
@@ -124,6 +155,7 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
   const savedWalletExposure = await fetchSavedWalletExposure(mint, holders);
   const twitterNarrative = await fetchTwitterNarrative(graduatedCoin || jupiterAsset, gmgn);
   const priceUsd = firstPositiveNumber(tokenPriceFromGmgn(gmgn), jupiterAsset?.usdPrice, trendingToken?.price);
+  const volume1hUsd = volume1hUsdFromJupiterAsset(jupiterAsset);
   const marketCapUsd = firstPositiveNumber(
     marketCapFromGmgn(gmgn),
     jupiterAsset?.mcap,
@@ -156,6 +188,7 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
       gmgnTotalFeesSol: Number(gmgn?.total_fee ?? jupiterAsset?.fees ?? 0),
       gmgnTradeFeesSol: Number(gmgn?.trade_fee ?? 0),
       graduatedVolumeUsd: Number(graduatedCoin?.volume ?? 0),
+      volume1hUsd,
       graduatedMarketCapUsd: Number(graduatedCoin?.marketCap ?? 0),
       trendingVolumeUsd: Number(trendingToken?.volume ?? 0),
       trendingSwaps: Number(trendingToken?.swaps ?? 0),
@@ -186,6 +219,7 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
     twitterNarrative,
     createdAtMs: now(),
   };
+  candidate.builtAtMs = now();
   candidate.filters = filterCandidate(candidate);
   return candidate;
 }
