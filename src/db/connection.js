@@ -399,7 +399,7 @@ export function initDb() {
     trending_min_swaps: 0,
     trending_max_rug_ratio: 0,
     trending_max_bundler_rate: 0,
-    min_graduated_age_ms: 60_000,
+    min_graduated_age_ms: 20_000,
     max_graduated_age_ms: 900_000,
     min_liquidity_usd: 5_000,
     position_size_sol: 0.1,
