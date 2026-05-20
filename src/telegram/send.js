@@ -9,16 +9,22 @@ import { candidateButtons, batchRevealButtons, positionButtons, intentButtons } 
 import { batchById } from '../db/decisions.js';
 
 export async function sendTelegram(text, extra = {}) {
-  return bot.sendMessage(TELEGRAM_CHAT_ID, text, {
-    parse_mode: 'HTML',
-    disable_web_page_preview: true,
-    ...(TELEGRAM_TOPIC_ID ? { message_thread_id: Number(TELEGRAM_TOPIC_ID) } : {}),
-    ...extra,
-  });
+  try {
+    return await bot.sendMessage(TELEGRAM_CHAT_ID, text, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...(TELEGRAM_TOPIC_ID ? { message_thread_id: Number(TELEGRAM_TOPIC_ID) } : {}),
+      ...extra,
+    });
+  } catch (err) {
+    console.log(`[telegram] send failed: ${err?.message || String(err)}`);
+    return null;
+  }
 }
 
 export async function sendCandidateAlert(candidateId, candidate, decision) {
   const sent = await sendTelegram(candidateSummary(candidate, decision), candidateButtons(candidateId, decision));
+  if (!sent) return;
   db.prepare(`
     INSERT INTO alerts (candidate_id, mint, kind, sent_at_ms, telegram_message_id, payload_json)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -30,6 +36,7 @@ export async function sendBatchReveal(batchId, rows, decision, triggerCandidateI
     batchRevealSummary(batchId, rows, decision, triggerCandidateId),
     batchRevealButtons(batchId, rows, decision, triggerCandidateId),
   );
+  if (!sent) return;
   db.prepare(`
     INSERT INTO alerts (candidate_id, mint, kind, sent_at_ms, telegram_message_id, payload_json)
     VALUES (?, ?, ?, ?, ?, ?)
