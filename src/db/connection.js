@@ -382,7 +382,7 @@ export function initDb() {
     require_fee_claim: false,
     token_age_max_ms: 900_000,
     min_mcap_usd: 15000,
-    max_mcap_usd: 0,
+    max_mcap_usd: 100_000,
     min_fee_claim_sol: 0,
     min_gmgn_total_fee_sol: 0,
     min_holders: 0,
