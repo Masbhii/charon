@@ -90,8 +90,10 @@ export function createLivePosition(candidateId, candidate, decision, swap, reaso
   const trailingEnabled = (strat.trailing_enabled ?? boolSetting('default_trailing_enabled', true)) ? 1 : 0;
   const trailingPercent = strat.trailing_percent ?? numSetting('default_trailing_percent', 20);
 
-  if (swap?.outputAmount == null) {
-    throw new Error('Cannot create live position: token_amount_raw is null');
+  // Guard: token_amount_raw null menyebabkan posisi tidak bisa exit otomatis.
+  // executeLiveSell() akan throw jika field ini null.
+  if (swap.outputAmount == null) {
+    console.log(`[positions] WARNING: token_amount_raw null untuk mint ${candidate.token.mint} - posisi live mungkin tidak bisa di-close otomatis`);
   }
 
   return db.transaction(() => {

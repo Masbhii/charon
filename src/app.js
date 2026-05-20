@@ -31,9 +31,10 @@ export async function startCharon() {
     setInterval(() => trackServer(() => fetchServerSignals()), SIGNAL_POLL_MS);
 
     if (GRADUATE_IMMEDIATE_ENABLED) {
-      const { startWebsocket } = await import('./signals/feeClaim.js');
+      const { startWebsocket, setCandidateHandler: setWsCandidateHandler } = await import('./signals/feeClaim.js');
+      setWsCandidateHandler(processCandidateFromSignals);
       startWebsocket();
-      console.log('[bot] Graduate Immediate: WebSocket listener aktif');
+      console.log('[bot] graduate_immediate: WebSocket migrate listener enabled');
     }
 
     // Price monitor for dip buy strategy

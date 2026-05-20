@@ -141,6 +141,15 @@ export function filterCandidate(candidate) {
     failures.push(`holders: ${holderCount} < ${strat.min_holders}`);
   }
 
+  // Liquidity minimum - filter token yang praktis tidak bisa dijual
+  // Data liquidityUsd sudah tersedia dari Jupiter tanpa call tambahan
+  if (strat.min_liquidity_usd > 0) {
+    const liquidityUsd = Number(candidate.metrics?.liquidityUsd ?? 0);
+    if (liquidityUsd < strat.min_liquidity_usd) {
+      failures.push(`liquidity: $${liquidityUsd.toFixed(0)} < $${strat.min_liquidity_usd}`);
+    }
+  }
+
   // Top holder concentration (legacy single-wallet cap)
   if (strat.max_top20_holder_percent < 100 && Number.isFinite(maxHolder) && maxHolder > strat.max_top20_holder_percent) {
     failures.push(`max top holder: ${maxHolder}% > ${strat.max_top20_holder_percent}%`);
