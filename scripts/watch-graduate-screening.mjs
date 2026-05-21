@@ -22,7 +22,7 @@ process.env.TWITTER_ENABLED = 'false';
 const { initDb } = await import('../src/db/connection.js');
 const { strategyById, setActiveStrategy, activeStrategy } = await import('../src/db/settings.js');
 const { fetchGraduatedCoins, graduated } = await import('../src/signals/graduated.js');
-const { buildCandidate, duplicateTickerOgFailure } = await import('../src/pipeline/candidateBuilder.js');
+const { buildCandidate, computeHolderQualityScore, duplicateTickerOgFailure } = await import('../src/pipeline/candidateBuilder.js');
 const { now } = await import('../src/utils.js');
 
 function fmtAge(ms) {
@@ -82,7 +82,7 @@ let tick = 0;
 console.log('╔══════════════════════════════════════════════════════════════╗');
 console.log('║  WATCH graduate_immediate — realtime screening               ║');
 console.log('╚══════════════════════════════════════════════════════════════╝');
-console.log(`Poll setiap ${intervalMs / 1000}s | umur ${strat.min_graduated_age_ms / 1000}s–${strat.max_graduated_age_ms / 1000}s | mcap ${fmtUsd(strat.min_mcap_usd)}–${fmtUsd(strat.max_mcap_usd)}`);
+console.log(`Poll setiap ${intervalMs / 1000}s | umur ${strat.min_graduated_age_ms / 1000}s–${strat.max_graduated_age_ms / 1000}s | mcap ${fmtUsd(strat.min_mcap_usd)}–${fmtUsd(strat.max_mcap_usd)} | HQS≥${strat.min_holder_quality_score || 0}`);
 console.log(`Confirm Jupiter: ${confirmFull ? 'YA' : 'tidak (quick Pump saja)'}`);
 console.log('Ctrl+C untuk berhenti\n');
 
@@ -122,7 +122,8 @@ async function scanOnce() {
   for (const r of analyzed) {
     const status = r.pass ? '✓ PASS' : '✗ FAIL';
     const reason = r.reasons.length ? ` | ${r.reasons.join('; ')}` : '';
-    console.log(`  ${status} | ${r.symbol.padEnd(12)} | age=${r.age.padEnd(8)} mcap=${r.mcapPump.padEnd(8)}${reason}`);
+    const hqsStr = r.hqs ? ` hqs=${r.hqs}` : '';
+    console.log(`  ${status} | ${r.symbol.padEnd(12)} | age=${r.age.padEnd(8)} mcap=${r.mcapPump.padEnd(8)}${hqsStr}${reason}`);
     console.log(`           CA: ${r.CA}`);
   }
 
@@ -145,6 +146,13 @@ async function scanOnce() {
         fullPass = candidate.filters?.passed ?? false;
         fullFailures = candidate.filters?.failures ?? [];
         mcapJup = fmtUsd(candidate.metrics?.marketCapUsd);
+        if (candidate.holders && strat.min_holder_quality_score > 0) {
+          const hqs = computeHolderQualityScore(candidate);
+          row.hqs = `${hqs.score}/100`;
+          if (!fullPass && hqs.flags.length) {
+            fullFailures = [...fullFailures, `hqs flags: ${hqs.flags.join(', ')}`];
+          }
+        }
       } catch (err) {
         fullPass = false;
         fullFailures = [`build error: ${err.message}`];

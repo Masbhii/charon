@@ -1,0 +1,139 @@
+
+<h2 class="sr-only">Proyeksi partial TP 65% vs 80% dengan berbagai skenario moonbag untuk entry 0.1 SOL</h2>
+
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px">
+  <div style="background:var(--color-background-danger);border-radius:var(--border-radius-lg);padding:12px 14px">
+    <div style="font-size:11px;color:var(--color-text-danger)">partial TP 65% (lama)</div>
+    <div style="font-size:18px;font-weight:500;color:var(--color-text-danger)">0.0975 SOL</div>
+    <div style="font-size:11px;color:var(--color-text-danger);margin-top:2px">belum balik modal jika moonbag mati</div>
+  </div>
+  <div style="background:var(--color-background-success);border-radius:var(--border-radius-lg);padding:12px 14px">
+    <div style="font-size:11px;color:var(--color-text-success)">partial TP 80% (baru)</div>
+    <div style="font-size:18px;font-weight:500;color:var(--color-text-success)">0.12 SOL</div>
+    <div style="font-size:11px;color:var(--color-text-success);margin-top:2px">modal balik + profit 0.02 SOL confirmed</div>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:12px 14px">
+    <div style="font-size:11px;color:var(--color-text-secondary)">moonbag @ +50% entry</div>
+    <div style="font-size:18px;font-weight:500">0.03 SOL</div>
+    <div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px">20% sisa posisi, gratis jika TP hit</div>
+  </div>
+</div>
+
+<div style="border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:14px">
+  <div style="font-size:13px;font-weight:500;margin-bottom:12px">proyeksi total return — entry 0.1 SOL, partial TP di +50%</div>
+  <div style="overflow-x:auto">
+    <table style="width:100%;font-size:12px;border-collapse:collapse">
+      <thead>
+        <tr style="border-bottom:0.5px solid var(--color-border-tertiary)">
+          <th style="text-align:left;padding:6px 8px;font-weight:500;color:var(--color-text-secondary)">skenario moonbag</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:500;color:var(--color-text-secondary)">65% jual (lama)</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:500;color:var(--color-text-success)">80% jual (baru)</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:500;color:var(--color-text-secondary)">multiplier</th>
+        </tr>
+      </thead>
+      <tbody id="tbl"></tbody>
+    </table>
+  </div>
+</div>
+
+<div style="border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:14px">
+  <div style="font-size:13px;font-weight:500;margin-bottom:10px">simulator interaktif</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <label style="font-size:12px;color:var(--color-text-secondary);min-width:160px">% jual di partial TP</label>
+    <input type="range" id="sl_pct" min="50" max="95" value="80" step="5" style="flex:1" oninput="calc()">
+    <span id="o_pct" style="font-size:12px;font-weight:500;min-width:36px;text-align:right">80%</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <label style="font-size:12px;color:var(--color-text-secondary);min-width:160px">TP threshold</label>
+    <input type="range" id="sl_tp" min="20" max="120" value="50" step="5" style="flex:1" oninput="calc()">
+    <span id="o_tp" style="font-size:12px;font-weight:500;min-width:36px;text-align:right">+50%</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <label style="font-size:12px;color:var(--color-text-secondary);min-width:160px">moonbag pump ke (x dari entry)</label>
+    <input type="range" id="sl_pump" min="1" max="100" value="28" step="1" style="flex:1" oninput="calc()">
+    <span id="o_pump" style="font-size:12px;font-weight:500;min-width:36px;text-align:right">28x</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px">
+    <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px;text-align:center">
+      <div style="font-size:11px;color:var(--color-text-secondary)">dapat dari TP</div>
+      <div id="r_tp" style="font-size:18px;font-weight:500">0.12</div>
+      <div style="font-size:11px;color:var(--color-text-tertiary)">SOL</div>
+    </div>
+    <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px;text-align:center">
+      <div style="font-size:11px;color:var(--color-text-secondary)">moonbag value</div>
+      <div id="r_mb" style="font-size:18px;font-weight:500">0.855</div>
+      <div style="font-size:11px;color:var(--color-text-tertiary)">SOL jika pump</div>
+    </div>
+    <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px;text-align:center">
+      <div style="font-size:11px;color:var(--color-text-secondary)">total return</div>
+      <div id="r_total" style="font-size:18px;font-weight:500">0.975</div>
+      <div style="font-size:11px;color:var(--color-text-tertiary)">SOL</div>
+    </div>
+    <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px;text-align:center">
+      <div style="font-size:11px;color:var(--color-text-secondary)">jika moonbag mati</div>
+      <div id="r_dead" style="font-size:18px;font-weight:500;color:var(--color-text-success)">+0.02</div>
+      <div style="font-size:11px;color:var(--color-text-tertiary)">SOL tetap profit</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const scenarios = [
+  { label: 'moonbag mati (0)', mult: 0 },
+  { label: 'moonbag ke $100K (2.86x)', mult: 2.86 },
+  { label: 'moonbag ke $500K (14.3x)', mult: 14.3 },
+  { label: 'moonbag ke $1M (28.5x)', mult: 28.5 },
+  { label: 'moonbag ke $2.5M (71x)', mult: 71 },
+];
+
+const entry = 0.1;
+const tpPct = 0.5;
+
+function calcRow(sellPct, mult) {
+  const posVal = entry * (1 + tpPct);
+  const sold   = posVal * sellPct;
+  const mbSize = posVal * (1 - sellPct);
+  const mbVal  = mbSize * mult;
+  return { sold, mbVal, total: sold + mbVal };
+}
+
+const tbl = document.getElementById('tbl');
+scenarios.forEach(s => {
+  const r65 = calcRow(0.65, s.mult);
+  const r80 = calcRow(0.80, s.mult);
+  const profColor65 = r65.total >= entry ? 'var(--color-text-success)' : 'var(--color-text-danger)';
+  const profColor80 = r80.total >= entry ? 'var(--color-text-success)' : 'var(--color-text-danger)';
+  const tr = document.createElement('tr');
+  tr.style.borderBottom = '0.5px solid var(--color-border-tertiary)';
+  tr.innerHTML = `
+    <td style="padding:7px 8px;color:var(--color-text-secondary)">${s.label}</td>
+    <td style="padding:7px 8px;text-align:right;font-weight:500;color:${profColor65}">${r65.total.toFixed(4)} SOL</td>
+    <td style="padding:7px 8px;text-align:right;font-weight:500;color:${profColor80}">${r80.total.toFixed(4)} SOL</td>
+    <td style="padding:7px 8px;text-align:right;color:var(--color-text-tertiary)">${s.mult > 0 ? s.mult + 'x' : '—'}</td>
+  `;
+  tbl.appendChild(tr);
+});
+
+function calc() {
+  const sellPct = parseInt(document.getElementById('sl_pct').value) / 100;
+  const tpVal   = parseInt(document.getElementById('sl_tp').value) / 100;
+  const pump    = parseInt(document.getElementById('sl_pump').value);
+  document.getElementById('o_pct').textContent  = Math.round(sellPct*100) + '%';
+  document.getElementById('o_tp').textContent   = '+' + Math.round(tpVal*100) + '%';
+  document.getElementById('o_pump').textContent = pump + 'x';
+
+  const posVal  = entry * (1 + tpVal);
+  const sold    = posVal * sellPct;
+  const mbSize  = posVal * (1 - sellPct);
+  const mbPump  = mbSize * pump;
+  const dead    = sold - entry;
+
+  document.getElementById('r_tp').textContent    = sold.toFixed(4);
+  document.getElementById('r_mb').textContent    = mbPump.toFixed(4);
+  document.getElementById('r_total').textContent = (sold + mbPump).toFixed(4);
+  const deadEl = document.getElementById('r_dead');
+  deadEl.textContent = (dead >= 0 ? '+' : '') + dead.toFixed(4);
+  deadEl.style.color = dead >= 0 ? 'var(--color-text-success)' : 'var(--color-text-danger)';
+}
+calc();
+</script>

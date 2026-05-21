@@ -51,6 +51,80 @@ export function duplicateTickerOgFailure(mint, graduationRow, windowMs, graduate
   return null;
 }
 
+/**
+ * Holder Quality Score (HQS): bundler cluster, dev wallet, concentration.
+ * Score 0–100 (higher = healthier). No extra API calls.
+ */
+export function computeHolderQualityScore(candidate) {
+  const holders = candidate.holders;
+  const top20 = holders?.top20 ?? [];
+  const bundRate = Number(candidate.trending?.bundler_rate ?? candidate.metrics?.bundlerRate ?? 0);
+  const liqUsd = Number(candidate.metrics?.liquidityUsd ?? 0);
+  const mcapUsd = Math.max(Number(candidate.metrics?.marketCapUsd ?? 1), 1);
+  const flags = [];
+  let penalty = 0;
+
+  if (!top20 || top20.length < 3) {
+    return { score: 60, flags: ['no_holder_data'] };
+  }
+
+  const midPcts = top20
+    .slice(1, 15)
+    .map(h => Number(h.percent ?? 0))
+    .filter(p => p > 0.3);
+
+  if (midPcts.length >= 5) {
+    const avg = midPcts.reduce((a, b) => a + b, 0) / midPcts.length;
+    const variance = midPcts.reduce((s, p) => s + Math.pow(p - avg, 2), 0) / midPcts.length;
+    const cv = avg > 0 ? Math.sqrt(variance) / avg : 99;
+
+    if (cv < 0.45 && avg > 1.5 && midPcts.length >= 7) {
+      penalty += 35;
+      flags.push('uniform_cluster');
+    } else if (cv < 0.35 && avg > 2.0 && midPcts.length >= 5) {
+      penalty += 20;
+      flags.push('mod_uniform_cluster');
+    }
+  }
+
+  const topPct = Number(top20[0]?.percent ?? 0);
+  const poolRatio = liqUsd / mcapUsd;
+
+  if (topPct > 15) {
+    if (bundRate > 0.20 || poolRatio < 0.12) {
+      penalty += 30;
+      flags.push('high_single_holder');
+    }
+    if (topPct > 30 && bundRate > 0.10) {
+      penalty += 15;
+      flags.push('extreme_single_holder');
+    }
+  }
+
+  const top5excl = top20
+    .slice(1, 6)
+    .reduce((s, h) => s + Number(h.percent ?? 0), 0);
+
+  if (top5excl > 30 && bundRate > 0.15) {
+    penalty += 20;
+    flags.push('top5_concentrated');
+  } else if (top5excl > 40 && bundRate > 0.08) {
+    penalty += 15;
+    flags.push('top5_high');
+  }
+
+  if (bundRate > 0.45) {
+    penalty += 25;
+    flags.push('high_bundler_rate');
+  } else if (bundRate > 0.30) {
+    penalty += 10;
+    flags.push('mod_bundler_rate');
+  }
+
+  const score = Math.max(0, 100 - penalty);
+  return { score, flags };
+}
+
 export function filterCandidate(candidate) {
   const strat = activeStrategy();
   const failures = [];
@@ -148,6 +222,14 @@ export function filterCandidate(candidate) {
     const liquidityUsd = Number(candidate.metrics?.liquidityUsd ?? 0);
     if (liquidityUsd < strat.min_liquidity_usd) {
       failures.push(`liquidity: $${liquidityUsd.toFixed(0)} < $${strat.min_liquidity_usd}`);
+    }
+  }
+
+  if (strat.min_holder_quality_score > 0 && candidate.holders) {
+    const hqs = computeHolderQualityScore(candidate);
+    if (hqs.score < strat.min_holder_quality_score) {
+      const flagStr = hqs.flags.length ? ` (${hqs.flags.join(', ')})` : '';
+      failures.push(`holder quality: ${hqs.score}/100 < ${strat.min_holder_quality_score}${flagStr}`);
     }
   }
 

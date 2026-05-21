@@ -53,7 +53,7 @@ process.env.TWITTER_ENABLED = 'false';
 const { initDb } = await import('../src/db/connection.js');
 const { strategyById, setActiveStrategy, activeStrategy } = await import('../src/db/settings.js');
 const { fetchGraduatedCoins, graduated } = await import('../src/signals/graduated.js');
-const { buildCandidate, duplicateTickerOgFailure } = await import('../src/pipeline/candidateBuilder.js');
+const { buildCandidate, duplicateTickerOgFailure, computeHolderQualityScore } = await import('../src/pipeline/candidateBuilder.js');
 const { now } = await import('../src/utils.js');
 
 function escapeHtml(value) {
@@ -135,6 +135,7 @@ function pickStrategy(strat) {
     max_bundle_single_holder_percent: strat.max_bundle_single_holder_percent,
     max_bundle_top4_combined_percent: strat.max_bundle_top4_combined_percent,
     duplicate_ticker_og_window_ms: strat.duplicate_ticker_og_window_ms,
+    min_holder_quality_score: strat.min_holder_quality_score,
     partial_tp: strat.partial_tp,
     partial_tp_at_percent: strat.partial_tp_at_percent,
     partial_tp_sell_percent: strat.partial_tp_sell_percent,
@@ -159,8 +160,12 @@ function safeAppendJsonl(file, row) {
 }
 
 function candidateMetrics(candidate) {
+  const hqs = candidate.holders && strat.min_holder_quality_score > 0
+    ? computeHolderQualityScore(candidate)
+    : null;
   return {
     token: candidate.token,
+    holder_quality: hqs ? { score: hqs.score, flags: hqs.flags } : null,
     metrics: {
       price_usd: candidate.metrics?.priceUsd ?? null,
       market_cap_usd: candidate.metrics?.marketCapUsd ?? null,
@@ -329,14 +334,14 @@ await sendTelegramMessage([
   `Duration: <b>${durationMs > 0 ? `${(durationMs / 3_600_000).toFixed(1)}h` : 'off'}</b>`,
   `Confirm pass: <b>${confirmPass ? 'yes' : 'no'}</b>`,
   '',
-  `Filters: age ${strat.min_graduated_age_ms / 1000}s-${strat.max_graduated_age_ms / 1000}s, mcap ${fmtUsd(strat.min_mcap_usd)}-${fmtUsd(strat.max_mcap_usd)}`,
+  `Filters: age ${strat.min_graduated_age_ms / 1000}s-${strat.max_graduated_age_ms / 1000}s, mcap ${fmtUsd(strat.min_mcap_usd)}-${fmtUsd(strat.max_mcap_usd)}, HQS≥${strat.min_holder_quality_score || 0}, partial TP ${strat.partial_tp_sell_percent}%`,
   '<i>Data-only mode. No trade execution.</i>',
 ].join('\n'));
 
 async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
-  if (!confirmPass) return;
+  if (!confirmPass) return null;
   const lastAt = lastFullCheckAt.get(mint) || 0;
-  if (observedAtMs - lastAt < fullRefreshMs) return;
+  if (observedAtMs - lastAt < fullRefreshMs) return null;
   lastFullCheckAt.set(mint, observedAtMs);
 
   const buildStart = Date.now();
@@ -350,6 +355,13 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
       60_000,
       `buildCandidate(${mint.slice(0, 8)})`,
     );
+    const full = {
+      passed: candidate.filters?.passed ?? false,
+      failures: candidate.filters?.failures ?? [],
+      hqs: candidate.holders && strat.min_holder_quality_score > 0
+        ? computeHolderQualityScore(candidate)
+        : null,
+    };
     safeAppendJsonl(fullChecksFile, {
       type: 'full_check',
       session_id: sessionId,
@@ -361,6 +373,7 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
       ...candidateMetrics(candidate),
     });
     totalFullChecks += 1;
+    return full;
   } catch (err) {
     safeAppendJsonl(fullChecksFile, {
       type: 'full_check_error',
@@ -373,6 +386,7 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
       error: err.message,
     });
     totalFullCheckErrors += 1;
+    return { passed: false, failures: [err.message], hqs: null };
   }
 }
 
@@ -397,15 +411,28 @@ async function scanOnce() {
     const q = quickPrefilter(coin, strat, graduated);
     if (q.passed) quickPassCount += 1;
 
+    let fullFilter = null;
+    if (q.passed && confirmPass) {
+      fullFilter = await maybeFullCheck({ mint, coin, observedAtMs, observedAtIso });
+    }
+
     if (verbose) {
-      analyzed.push({
+      const reasons = [...q.failures];
+      if (fullFilter && !fullFilter.passed) {
+        reasons.push(...fullFilter.failures);
+      }
+      const row = {
         symbol: coin.ticker || coin.symbol || '?',
         mint,
-        pass: q.passed,
+        pass: confirmPass ? (q.passed && (fullFilter?.passed ?? false)) : q.passed,
         age: fmtAge(q.ageMs),
         mcapPump: fmtUsd(q.marketCapUsd),
-        reasons: q.failures,
-      });
+        reasons,
+      };
+      if (fullFilter?.hqs) {
+        row.hqs = `${fullFilter.hqs.score}/100`;
+      }
+      analyzed.push(row);
     }
 
     const observation = {
@@ -442,7 +469,8 @@ async function scanOnce() {
       });
     }
 
-    if (q.passed && !firstPassMints.has(mint)) {
+    const passForAlert = confirmPass ? (q.passed && fullFilter?.passed) : q.passed;
+    if (passForAlert && !firstPassMints.has(mint)) {
       firstPassMints.add(mint);
       newPassCount += 1;
       safeAppendJsonl(eventsFile, {
@@ -462,9 +490,6 @@ async function scanOnce() {
       }
     }
 
-    if (q.passed) {
-      await maybeFullCheck({ mint, coin, observedAtMs, observedAtIso });
-    }
   }
 
   const summary = {
@@ -487,8 +512,9 @@ async function scanOnce() {
     console.log('── Semua token dianalisa (CA lengkap) ──');
     for (const r of analyzed) {
       const status = r.pass ? '✓ PASS' : '✗ FAIL';
+      const hqsStr = r.hqs ? ` hqs=${r.hqs}` : '';
       const reason = r.reasons.length ? ` | ${r.reasons.join('; ')}` : '';
-      console.log(`  ${status} | ${String(r.symbol).padEnd(12)} | age=${r.age.padEnd(8)} mcap=${r.mcapPump.padEnd(8)}${reason}`);
+      console.log(`  ${status} | ${String(r.symbol).padEnd(12)} | age=${r.age.padEnd(8)} mcap=${r.mcapPump.padEnd(8)}${hqsStr}${reason}`);
       console.log(`           CA: ${r.mint}`);
     }
     if (!quickPassCount && tick === 1) {
