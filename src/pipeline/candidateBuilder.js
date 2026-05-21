@@ -199,14 +199,40 @@ export function filterCandidate(candidate) {
   return { passed: failures.length === 0, failures, strategy: strat.id };
 }
 
+function isFastMigrateEnrichment(route, strat) {
+  return route === 'migrate_immediate'
+    || (strat?.id === 'graduate_immediate' && strat?.entry_mode === 'immediate');
+}
+
 export async function buildCandidate({ mint, fee = null, signature = null, graduatedCoin = null, trendingToken = null, route }) {
   const strat = activeStrategy();
-  const gmgn = await fetchGmgnTokenInfo(mint);
-  const jupiterAsset = await fetchJupiterAsset(mint);
-  const holders = await fetchJupiterHolders(mint);
-  const chart = await fetchJupiterChartContext(mint);
-  const savedWalletExposure = await fetchSavedWalletExposure(mint, holders);
-  const twitterNarrative = await fetchTwitterNarrative(graduatedCoin || jupiterAsset, gmgn);
+  const fastMigrate = isFastMigrateEnrichment(route, strat);
+  let gmgn;
+  let jupiterAsset;
+  let holders;
+  let chart;
+  let savedWalletExposure;
+  let twitterNarrative;
+
+  if (fastMigrate) {
+    [gmgn, jupiterAsset, holders] = await Promise.all([
+      fetchGmgnTokenInfo(mint),
+      fetchJupiterAsset(mint),
+      fetchJupiterHolders(mint),
+    ]);
+    chart = null;
+    savedWalletExposure = { holderCount: 0, checked: 0, wallets: [] };
+    twitterNarrative = null;
+  } else {
+    [gmgn, jupiterAsset, holders, chart] = await Promise.all([
+      fetchGmgnTokenInfo(mint),
+      fetchJupiterAsset(mint),
+      fetchJupiterHolders(mint),
+      fetchJupiterChartContext(mint),
+    ]);
+    savedWalletExposure = await fetchSavedWalletExposure(mint, holders);
+    twitterNarrative = await fetchTwitterNarrative(graduatedCoin || jupiterAsset, gmgn);
+  }
   const priceUsd = firstPositiveNumber(tokenPriceFromGmgn(gmgn), jupiterAsset?.usdPrice, trendingToken?.price);
   const volume1hUsd = volume1hUsdFromJupiterAsset(jupiterAsset);
   const marketCapUsd = firstPositiveNumber(

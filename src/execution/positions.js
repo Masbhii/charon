@@ -1,5 +1,5 @@
 import { now, json } from '../utils.js';
-import { numSetting, boolSetting, strategyById } from '../db/settings.js';
+import { numSetting, boolSetting, strategyById, activeStrategy } from '../db/settings.js';
 import { db } from '../db/connection.js';
 import { firstPositiveNumber, marketCapFromGmgn, tokenPriceFromGmgn } from '../utils.js';
 import { fetchGmgnTokenInfo } from '../enrichment/gmgn.js';
@@ -30,15 +30,21 @@ export async function freshEntryMarket(mint, candidate) {
 export async function refreshCandidateForExecution(row) {
   const candidate = row.candidate;
   const mint = candidate.token.mint;
-  const gmgn = await fetchGmgnTokenInfo(mint, false);
-  const asset = await fetchJupiterAsset(mint, { useCache: false });
-  const holders = await fetchJupiterHolders(mint);
-  const chart = await fetchJupiterChartContext(mint);
+  const strat = strategyById(activeStrategy()?.id);
+  const fastMigrate = strat?.id === 'graduate_immediate';
+  const [gmgn, asset, holders, chart] = await Promise.all([
+    fetchGmgnTokenInfo(mint, false),
+    fetchJupiterAsset(mint, { useCache: false }),
+    fetchJupiterHolders(mint),
+    fastMigrate ? Promise.resolve(null) : fetchJupiterChartContext(mint),
+  ]);
   const selectedTrending = trending.get(mint) || candidate.trending || null;
   const selectedHolders = holders?.holders?.length ? holders : candidate.holders;
-  const selectedSavedWalletExposure = selectedHolders
-    ? await fetchSavedWalletExposure(mint, selectedHolders)
-    : candidate.savedWalletExposure;
+  const selectedSavedWalletExposure = fastMigrate
+    ? (candidate.savedWalletExposure || { holderCount: 0, checked: 0, wallets: [] })
+    : selectedHolders
+      ? await fetchSavedWalletExposure(mint, selectedHolders)
+      : candidate.savedWalletExposure;
   const priceUsd = firstPositiveNumber(tokenPriceFromGmgn(gmgn), asset?.usdPrice, selectedTrending?.price, candidate.metrics?.priceUsd);
   const marketCapUsd = firstPositiveNumber(
     marketCapFromGmgn(gmgn),
@@ -123,16 +129,19 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
     pnlPercent = Number(jupiterPnl.totalPnlPercentageNative);
     pnlSol = Number.isFinite(Number(jupiterPnl.totalPnlNative)) ? Number(jupiterPnl.totalPnlNative) : pnlSol;
   }
+  const strat = strategyById(position.strategy_id);
   const tpHit = pnlPercent >= Number(position.tp_percent);
   const slHit = pnlPercent <= Number(position.sl_percent);
-  const trailingArmed = position.trailing_armed || (position.trailing_enabled && tpHit);
+  const earlyTrailArmPct = Number(strat?.early_trail_arm_pct ?? 0);
+  const trailingArmed = position.trailing_armed
+    || (position.trailing_enabled && tpHit)
+    || (position.trailing_enabled && earlyTrailArmPct > 0 && pnlPercent >= earlyTrailArmPct);
   const trailDrop = highWaterMcap > 0 ? (Number(mcap) / highWaterMcap - 1) * 100 : 0;
   const trailingHit = trailingArmed && position.trailing_enabled && trailDrop <= -Math.abs(Number(position.trailing_percent));
   let exitReason = null;
   let closed = false;
 
   // Max hold time check
-  const strat = strategyById(position.strategy_id);
   if (strat?.max_hold_ms > 0 && (now() - position.opened_at_ms) >= strat.max_hold_ms) {
     exitReason = 'MAX_HOLD';
   }
@@ -141,13 +150,17 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   if (!exitReason && strat?.partial_tp && !position.partial_tp_done && pnlPercent >= strat.partial_tp_at_percent) {
     db.prepare('UPDATE dry_run_positions SET partial_tp_done = 1 WHERE id = ?').run(position.id);
     console.log(`[position] ${position.id} partial TP at ${pnlPercent.toFixed(1)}% (${strat.partial_tp_sell_percent}% sell)`);
+    let partialSellOk = position.execution_mode !== 'live';
     if (position.execution_mode === 'live' && position.token_amount_raw) {
       try {
         const sellAmount = Math.floor(Number(position.token_amount_raw) * (strat.partial_tp_sell_percent / 100));
         if (sellAmount > 0) {
           const sell = await executeLiveSell({ ...position, token_amount_raw: String(sellAmount) }, 'PARTIAL_TP');
+          partialSellOk = true;
           const remaining = Number(position.token_amount_raw) - sellAmount;
-          db.prepare('UPDATE dry_run_positions SET token_amount_raw = ? WHERE id = ?').run(String(remaining), position.id);
+          if (!strat.moonbag_on_partial_tp) {
+            db.prepare('UPDATE dry_run_positions SET token_amount_raw = ? WHERE id = ?').run(String(remaining), position.id);
+          }
           db.prepare(`
             INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
             VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, 'PARTIAL_TP', ?)
@@ -159,6 +172,13 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
       } catch (err) {
         console.log(`[position] ${position.id} partial sell failed: ${err.message}`);
       }
+    }
+    if (strat.moonbag_on_partial_tp && partialSellOk) {
+      exitReason = 'MOONBAG';
+      const remainingRaw = position.token_amount_raw
+        ? Math.floor(Number(position.token_amount_raw) * (1 - (strat.partial_tp_sell_percent / 100)))
+        : null;
+      console.log(`[position] ${position.id} MOONBAG — ${remainingRaw ?? '?'} tokens left in wallet (manual)`);
     }
   }
 
@@ -180,7 +200,22 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   `).run(highWaterMcap, highWaterPrice, trailingArmed ? 1 : 0, position.id);
 
   if (exitReason && autoExit && position.execution_mode === 'live') {
-    if (sellInProgress.has(position.id)) return { ...position, exitReason: null };
+    if (exitReason === 'MOONBAG') {
+      db.prepare(`
+        UPDATE dry_run_positions
+        SET status = 'closed', closed_at_ms = ?, exit_price = ?, exit_mcap = ?, exit_reason = ?,
+            pnl_percent = ?, pnl_sol = ?
+        WHERE id = ?
+      `).run(now(), price, mcap, exitReason, pnlPercent, pnlSol, position.id);
+      db.prepare(`
+        INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
+        VALUES (?, ?, 'moonbag', ?, ?, ?, ?, ?, 'MOONBAG', ?)
+      `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est,
+        json({ pnlPercent, pnlSol, note: 'remainder in wallet — monitor manually' }));
+      closed = true;
+    } else if (sellInProgress.has(position.id)) {
+      return { ...position, exitReason: null };
+    } else {
     sellInProgress.add(position.id);
     let sell;
     try {
@@ -205,7 +240,21 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
       VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?)
     `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent: finalPnlPercent, pnlSol: finalPnlSol, receivedSol: receivedSol ?? null, sell }));
     closed = true;
+    }
   } else if (exitReason && autoExit) {
+    if (exitReason === 'MOONBAG') {
+      db.prepare(`
+        UPDATE dry_run_positions
+        SET status = 'closed', closed_at_ms = ?, exit_price = ?, exit_mcap = ?, exit_reason = ?, pnl_percent = ?, pnl_sol = ?
+        WHERE id = ?
+      `).run(now(), price, mcap, exitReason, pnlPercent, pnlSol, position.id);
+      db.prepare(`
+        INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
+        VALUES (?, ?, 'moonbag', ?, ?, ?, ?, ?, 'MOONBAG', ?)
+      `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est,
+        json({ pnlPercent, pnlSol, note: 'remainder in wallet — monitor manually' }));
+      closed = true;
+    } else {
     db.prepare(`
       UPDATE dry_run_positions
       SET status = 'closed', closed_at_ms = ?, exit_price = ?, exit_mcap = ?, exit_reason = ?, pnl_percent = ?, pnl_sol = ?
@@ -216,6 +265,7 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
       VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?)
     `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent, pnlSol }));
     closed = true;
+    }
   }
   return {
     ...position,

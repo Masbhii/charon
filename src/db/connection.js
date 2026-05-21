@@ -382,7 +382,7 @@ export function initDb() {
     require_fee_claim: false,
     token_age_max_ms: 900_000,
     min_mcap_usd: 15000,
-    max_mcap_usd: 100_000,
+    max_mcap_usd: 0,
     min_fee_claim_sol: 0,
     min_gmgn_total_fee_sol: 0,
     min_holders: 0,
@@ -404,13 +404,15 @@ export function initDb() {
     min_liquidity_usd: 5_000,
     position_size_sol: 0.1,
     max_open_positions: 2,
-    tp_percent: 100,
+    tp_percent: 120,
     sl_percent: -70,
-    trailing_enabled: false,
-    trailing_percent: 0,
+    trailing_enabled: true,
+    trailing_percent: 20,
+    early_trail_arm_pct: 15,
     partial_tp: true,
     partial_tp_at_percent: 50,
-    partial_tp_sell_percent: 50,
+    partial_tp_sell_percent: 65,
+    moonbag_on_partial_tp: true,
     max_hold_ms: 900_000,
     use_llm: false,
     llm_min_confidence: 0,
@@ -449,6 +451,39 @@ export function initDb() {
     use_llm: true,
     llm_min_confidence: 58,
   }), Date.now());
+
+  patchGraduateImmediateStrategyConfig();
+}
+
+/** Merge new graduate_immediate keys into existing DB rows (INSERT OR IGNORE does not update). */
+function patchGraduateImmediateStrategyConfig() {
+  const row = db.prepare("SELECT config_json FROM strategies WHERE id = 'graduate_immediate'").get();
+  if (!row?.config_json) return;
+  let config;
+  try {
+    config = JSON.parse(row.config_json);
+  } catch {
+    return;
+  }
+  const patches = {
+    max_mcap_usd: 0,
+    partial_tp_sell_percent: 65,
+    moonbag_on_partial_tp: true,
+    trailing_enabled: true,
+    trailing_percent: 20,
+    early_trail_arm_pct: 15,
+  };
+  let changed = false;
+  for (const [key, value] of Object.entries(patches)) {
+    if (config[key] !== value) {
+      config[key] = value;
+      changed = true;
+    }
+  }
+  if (changed) {
+    db.prepare("UPDATE strategies SET config_json = ? WHERE id = 'graduate_immediate'").run(JSON.stringify(config));
+    console.log('[db] patched graduate_immediate strategy config');
+  }
 }
 
 export function ensureColumn(table, column, ddl) {

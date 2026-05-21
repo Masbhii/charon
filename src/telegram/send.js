@@ -81,7 +81,14 @@ export async function sendPositionOpen(positionId) {
 
 export async function sendPositionExit(position) {
   const label = position?.execution_mode === 'live' ? 'Live exit' : 'Dry-run exit';
-  await sendTelegram(`🏁 <b>${label}: ${escapeHtml(position.exitReason)}</b>\n\n${formatPosition({ ...position, status: 'closed' })}`);
+  const extra = position.exitReason === 'MOONBAG'
+    ? [
+      '',
+      '🌙 <b>Moonbag</b> — sisa token ada di wallet. Bot tidak monitoring lagi.',
+      `<a href="${gmgnLink(position.mint)}">GMGN</a> · <code>${escapeHtml(position.mint)}</code>`,
+    ].join('\n')
+    : '';
+  await sendTelegram(`🏁 <b>${label}: ${escapeHtml(position.exitReason)}</b>\n\n${formatPosition({ ...position, status: 'closed' })}${extra}`);
 }
 
 export async function sendTradeIntent(intentId, candidate, decision) {

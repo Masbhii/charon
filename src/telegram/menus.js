@@ -100,6 +100,7 @@ export const strategyNumericLabels = {
   tp_percent: 'take profit percent',
   sl_percent: 'stop loss percent',
   trailing_percent: 'trailing percent',
+  early_trail_arm_pct: 'arm trailing from this profit % (before full TP)',
   partial_tp_at_percent: 'partial TP trigger percent',
   partial_tp_sell_percent: 'partial TP sell percent',
   max_hold_ms: 'maximum hold milliseconds',
