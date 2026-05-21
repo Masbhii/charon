@@ -404,7 +404,7 @@ export function initDb() {
     trending_max_rug_ratio: 0,
     trending_max_bundler_rate: 0,
     min_graduated_age_ms: 20_000,
-    max_graduated_age_ms: 900_000,
+    max_graduated_age_ms: 600_000,
     min_liquidity_usd: 8_000,
     position_size_sol: 0.1,
     max_open_positions: 2,
@@ -471,7 +471,7 @@ function patchGraduateImmediateStrategyConfig() {
   }
   const patches = {
     min_graduated_age_ms: 20_000,
-    max_graduated_age_ms: 900_000,
+    max_graduated_age_ms: 600_000,
     min_mcap_usd: 35_000,
     max_mcap_usd: 80_000,
     min_liquidity_usd: 8_000,
