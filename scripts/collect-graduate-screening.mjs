@@ -9,6 +9,7 @@
  *   node scripts/collect-graduate-screening.mjs --interval 5000
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --confirm-pass
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --confirm-pass --telegram
+ *   node scripts/collect-graduate-screening.mjs --interval 5000 --telegram --verbose
  *   node scripts/collect-graduate-screening.mjs --once --confirm-pass
  */
 import dotenv from 'dotenv';
@@ -39,6 +40,7 @@ const fullRefreshMs = Math.max(30_000, argNumber('--full-refresh-ms', 10 * 60_00
 const once = args.includes('--once');
 const maxTicks = Math.max(0, argNumber('--max-ticks', 0));
 const quiet = args.includes('--quiet');
+const verbose = args.includes('--verbose') || args.includes('--watch-style');
 const telegramRequested = args.includes('--telegram') || args.includes('--telegram-pass') || args.includes('--send-telegram');
 const finalFilesEnabled = !args.includes('--no-final-send');
 const durationHours = argNumber('--duration-hours', 72);
@@ -96,16 +98,16 @@ function quickPrefilter(coin, strat, graduatedMap) {
 
   if (gradDate <= 0) failures.push('no graduationDate');
   if (ageMs != null && strat.min_graduated_age_ms > 0 && ageMs < strat.min_graduated_age_ms) {
-    failures.push(`too young: ${ageMs}ms < ${strat.min_graduated_age_ms}ms`);
+    failures.push(`too young (${fmtAge(ageMs)} < ${strat.min_graduated_age_ms / 1000}s)`);
   }
   if (ageMs != null && strat.max_graduated_age_ms > 0 && ageMs > strat.max_graduated_age_ms) {
-    failures.push(`too old: ${ageMs}ms > ${strat.max_graduated_age_ms}ms`);
+    failures.push(`too old (${fmtAge(ageMs)} > ${strat.max_graduated_age_ms / 1000}s)`);
   }
   if (strat.min_mcap_usd > 0 && (!mcap || mcap < strat.min_mcap_usd)) {
-    failures.push(`mcap < min: ${mcap ?? 'null'} < ${strat.min_mcap_usd}`);
+    failures.push(`mcap ${fmtUsd(mcap)} < ${fmtUsd(strat.min_mcap_usd)}`);
   }
   if (strat.max_mcap_usd > 0 && mcap && mcap > strat.max_mcap_usd) {
-    failures.push(`mcap > max: ${mcap} > ${strat.max_mcap_usd}`);
+    failures.push(`mcap ${fmtUsd(mcap)} > ${fmtUsd(strat.max_mcap_usd)}`);
   }
 
   const dupMsg = duplicateTickerOgFailure(coin.coinMint, coin, strat.duplicate_ticker_og_window_ms, graduatedMap);
@@ -305,10 +307,18 @@ let totalFullCheckErrors = 0;
 const startedAtMs = now();
 let scanInProgress = false;
 
-console.log('[collect] graduate_immediate screening collector');
-console.log(`[collect] interval=${intervalMs}ms duration=${durationMs > 0 ? `${durationMs}ms` : 'off'} confirm_pass=${confirmPass} telegram=${telegram.enabled} log_dir=${logDir}`);
+console.log('[collect] graduate_immediate screening collector (data-only, no trades)');
+console.log(`[collect] interval=${intervalMs}ms duration=${durationMs > 0 ? `${durationMs}ms` : 'off'} confirm_pass=${confirmPass} telegram=${telegram.enabled} verbose=${verbose} log_dir=${logDir}`);
 console.log(`[collect] observations=${observationsFile}`);
 if (confirmPass) console.log(`[collect] full_checks=${fullChecksFile}`);
+if (verbose) {
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║  SCREENING graduate_immediate — logs + optional Telegram    ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log(`Poll setiap ${intervalMs / 1000}s | umur ${strat.min_graduated_age_ms / 1000}s–${strat.max_graduated_age_ms / 1000}s | mcap ${fmtUsd(strat.min_mcap_usd)}–${fmtUsd(strat.max_mcap_usd)}`);
+  console.log(`Telegram PASS alerts: ${telegram.enabled ? 'YA' : 'tidak (--telegram)'}`);
+  console.log('Ctrl+C untuk berhenti\n');
+}
 console.log('[collect] Ctrl+C to stop');
 
 await sendTelegramMessage([
@@ -380,11 +390,23 @@ async function scanOnce() {
 
   let quickPassCount = 0;
   let newPassCount = 0;
+  const analyzed = [];
 
   for (const coin of coins) {
     const mint = coin.coinMint;
     const q = quickPrefilter(coin, strat, graduated);
     if (q.passed) quickPassCount += 1;
+
+    if (verbose) {
+      analyzed.push({
+        symbol: coin.ticker || coin.symbol || '?',
+        mint,
+        pass: q.passed,
+        age: fmtAge(q.ageMs),
+        mcapPump: fmtUsd(q.marketCapUsd),
+        reasons: q.failures,
+      });
+    }
 
     const observation = {
       type: 'quick_observation',
@@ -430,6 +452,14 @@ async function scanOnce() {
         entry_proxy_age_ms: q.ageMs,
       });
       await sendTelegramMessage(passAlertText(observation));
+      if (verbose) {
+        console.log('\n🟢 ═══ LULUS FILTER (BARU) → Telegram terkirim ═══');
+        console.log(`   Symbol : ${observation.symbol || '?'}`);
+        console.log(`   CA     : ${mint}`);
+        console.log(`   Umur   : ${fmtAge(observation.age_ms)} sejak graduate`);
+        console.log(`   Mcap   : Pump ${fmtUsd(observation.market_cap_usd_pump)}`);
+        console.log('══════════════════════════════\n');
+      }
     }
 
     if (q.passed) {
@@ -452,7 +482,20 @@ async function scanOnce() {
   };
   safeAppendJsonl(eventsFile, summary);
 
-  if (!quiet) {
+  if (verbose) {
+    console.log(`\n[${observedAtIso}] tick #${tick} | tracked=${coins.length} | quick PASS=${quickPassCount} | FAIL=${coins.length - quickPassCount}`);
+    console.log('── Semua token dianalisa (CA lengkap) ──');
+    for (const r of analyzed) {
+      const status = r.pass ? '✓ PASS' : '✗ FAIL';
+      const reason = r.reasons.length ? ` | ${r.reasons.join('; ')}` : '';
+      console.log(`  ${status} | ${String(r.symbol).padEnd(12)} | age=${r.age.padEnd(8)} mcap=${r.mcapPump.padEnd(8)}${reason}`);
+      console.log(`           CA: ${r.mint}`);
+    }
+    if (!quickPassCount && tick === 1) {
+      console.log('\n(tidak ada token yang lulus quick filter saat ini — monitor terus…)\n');
+    }
+    console.log(`[graduated] tick #${tick} complete | new_pass_this_tick=${newPassCount}`);
+  } else if (!quiet) {
     console.log(`[collect] tick=${tick} tracked=${coins.length} quick_pass=${quickPassCount} new_pass=${newPassCount} unique_pass=${firstPassMints.size}`);
   }
 }
