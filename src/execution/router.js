@@ -15,12 +15,34 @@ import { sendPositionOpen, sendTelegram } from '../telegram/send.js';
 import { updateCandidateStatus } from '../db/candidates.js';
 import { createTradeIntent } from '../db/intents.js';
 
+export function computeDynamicPositionSize(balanceLamports, strat) {
+  const SOL = 1_000_000_000;
+  const GAS_RESERVE_LAMPORTS = Math.floor(0.05 * SOL);
+  const MIN_POSITION_LAMPORTS = Math.floor(0.05 * SOL);
+  const configSizeSol = strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1);
+  const MAX_POSITION_LAMPORTS = Math.floor(configSizeSol * 3 * SOL);
+
+  const availableLamports = balanceLamports - GAS_RESERVE_LAMPORTS;
+  if (availableLamports <= MIN_POSITION_LAMPORTS) {
+    return Math.floor(configSizeSol * SOL);
+  }
+
+  const openCount = openPositionCount();
+  const tierFractions = [0.20, 0.15, 0.10, 0.07];
+  const fraction = tierFractions[Math.min(openCount, tierFractions.length - 1)];
+  const dynamicLamports = Math.floor(availableLamports * fraction);
+  const finalLamports = Math.max(MIN_POSITION_LAMPORTS, Math.min(MAX_POSITION_LAMPORTS, dynamicLamports));
+  console.log(`[sizing] open=${openCount} balance=${(balanceLamports / SOL).toFixed(3)} SOL tier=${(fraction * 100).toFixed(0)}% size=${(finalLamports / SOL).toFixed(4)} SOL`);
+  return finalLamports;
+}
+
 export async function executeLiveBuy(selectedRow, decision, batchId, rows = [], triggerCandidateId = null) {
   const strat = activeStrategy();
-  const amountLamports = Math.floor((strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1)) * 1_000_000_000);
   const balance = await liveWalletBalanceLamports();
+  const amountLamports = computeDynamicPositionSize(balance, strat);
+  const dynamicSizeSol = amountLamports / 1_000_000_000;
   if (balance < amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) {
-    throw new Error(`Insufficient SOL balance. Need ${fmtSol((amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) / 1_000_000_000)} SOL including reserve.`);
+    throw new Error(`Insufficient SOL balance. Have ${fmtSol(balance / 1_000_000_000)} SOL, need ${fmtSol((amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) / 1_000_000_000)} SOL.`);
   }
   const swap = await executeJupiterSwap({
     inputMint: WSOL_MINT,
@@ -31,6 +53,9 @@ export async function executeLiveBuy(selectedRow, decision, batchId, rows = [], 
     swap.outputAmount = await fetchLiveTokenBalance(selectedRow.candidate.token.mint) || swap.outputAmount;
   }
   const positionId = createLivePosition(selectedRow.id, selectedRow.candidate, decision, swap, `live_batch_${batchId}`);
+  if (positionId && dynamicSizeSol) {
+    db.prepare('UPDATE dry_run_positions SET dynamic_size_sol = ? WHERE id = ?').run(dynamicSizeSol, positionId);
+  }
   logDecisionEvent({
     batchId,
     triggerCandidateId,
@@ -78,8 +103,9 @@ export async function executeConfirmedIntent(chatId, intentId) {
       ].join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
     }
     const strat = activeStrategy();
-    const amountLamports = Math.floor((strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1)) * 1_000_000_000);
     const balance = await liveWalletBalanceLamports();
+    const amountLamports = computeDynamicPositionSize(balance, strat);
+    const dynamicSizeSol = amountLamports / 1_000_000_000;
     if (balance < amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) {
       db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('rejected_insufficient_balance', now(), intentId);
       return bot.sendMessage(chatId, `Insufficient SOL balance. Need ${fmtSol((amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) / 1_000_000_000)} SOL.`, { parse_mode: 'HTML' });
@@ -93,6 +119,9 @@ export async function executeConfirmedIntent(chatId, intentId) {
       swap.outputAmount = await fetchLiveTokenBalance(freshRow.candidate.token.mint) || swap.outputAmount;
     }
     const positionId = createLivePosition(intent.candidate_id, freshRow.candidate, decision, swap, `confirmed_intent_${intentId}`);
+    if (positionId && dynamicSizeSol) {
+      db.prepare('UPDATE dry_run_positions SET dynamic_size_sol = ? WHERE id = ?').run(dynamicSizeSol, positionId);
+    }
     db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('executed_live', now(), intentId);
     logDecisionEvent({
       batchId: null,

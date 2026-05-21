@@ -3,7 +3,7 @@ import { numSetting, boolSetting, strategyById, activeStrategy } from '../db/set
 import { db } from '../db/connection.js';
 import { firstPositiveNumber, marketCapFromGmgn, tokenPriceFromGmgn } from '../utils.js';
 import { fetchGmgnTokenInfo } from '../enrichment/gmgn.js';
-import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, fetchJupiterWalletPnl, volume1hUsdFromJupiterAsset } from '../enrichment/jupiter.js';
+import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, fetchJupiterWalletPnl, batchFetchPrices, volume1hUsdFromJupiterAsset } from '../enrichment/jupiter.js';
 import { liveWalletPubkey } from '../liveExecutor.js';
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { filterCandidate } from '../pipeline/candidateBuilder.js';
@@ -114,16 +114,44 @@ export async function refreshCandidateForExecution(row) {
 
 const sellInProgress = new Set();
 
-export async function refreshPosition(position, { autoExit = true, jupiterPnl = null } = {}) {
-  const asset = await fetchJupiterAsset(position.mint);
+export async function refreshPosition(position, { autoExit = true, jupiterPnl = null, cachedBatchPrice = null } = {}) {
+  let asset = null;
+  if (cachedBatchPrice) {
+    asset = await fetchJupiterAsset(position.mint, { useCache: true, ttlMs: 15_000 });
+    if (cachedBatchPrice.usdPrice > 0 && asset) {
+      asset = { ...asset, usdPrice: cachedBatchPrice.usdPrice };
+    }
+  } else {
+    asset = await fetchJupiterAsset(position.mint);
+  }
+
   const price = firstPositiveNumber(asset?.usdPrice, position.high_water_price, position.entry_price);
   const mcap = firstPositiveNumber(asset?.mcap, asset?.fdv, position.high_water_mcap, position.entry_mcap);
-  if (!Number.isFinite(Number(mcap)) || !Number.isFinite(Number(position.entry_mcap)) || Number(position.entry_mcap) <= 0) {
+  const entryMcap = Number(position.entry_mcap);
+  if (!Number.isFinite(Number(mcap)) || !Number.isFinite(entryMcap) || entryMcap <= 0) {
+    console.log(`[position] ${position.id} mcap invalid (mcap=${mcap} entry=${entryMcap}), skip`);
     return null;
   }
-  const highWaterMcap = Math.max(Number(position.high_water_mcap || 0), Number(mcap));
+
+  const currentMcap = Number(mcap);
+  const prevLowest = Number(position.lowest_mcap_after_entry || entryMcap);
+  const lowestMcap = Math.min(prevLowest, currentMcap);
+  const dumpPercent = (lowestMcap / entryMcap - 1) * 100;
+  const pnlAtCurrentMcap = (currentMcap / entryMcap - 1) * 100;
+  const dumpThenRecovered = !position.dump_then_recovered && dumpPercent < -10 && pnlAtCurrentMcap >= 0;
+  db.prepare(`
+    UPDATE dry_run_positions
+    SET lowest_mcap_after_entry = ?,
+        dump_then_recovered = CASE WHEN ? THEN 1 ELSE dump_then_recovered END
+    WHERE id = ?
+  `).run(lowestMcap, dumpThenRecovered ? 1 : 0, position.id);
+  if (dumpThenRecovered) {
+    console.log(`[position] ${position.id} dump→recovery (was ${dumpPercent.toFixed(1)}%, now BEP+)`);
+  }
+
+  const highWaterMcap = Math.max(Number(position.high_water_mcap || 0), currentMcap);
   const highWaterPrice = Math.max(Number(position.high_water_price || 0), Number(price || 0));
-  let pnlPercent = (Number(mcap) / Number(position.entry_mcap) - 1) * 100;
+  let pnlPercent = (currentMcap / entryMcap - 1) * 100;
   let pnlSol = Number(position.size_sol) * pnlPercent / 100;
   if (jupiterPnl && Number.isFinite(Number(jupiterPnl.totalPnlPercentageNative))) {
     pnlPercent = Number(jupiterPnl.totalPnlPercentageNative);
@@ -131,7 +159,11 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   }
   const strat = strategyById(position.strategy_id);
   const tpHit = pnlPercent >= Number(position.tp_percent);
-  const slHit = pnlPercent <= Number(position.sl_percent);
+  const activeSlRule = db.prepare(
+    'SELECT sl_percent FROM tp_sl_rules WHERE position_id = ? ORDER BY updated_at_ms DESC LIMIT 1',
+  ).get(position.id);
+  const activeSl = Number(activeSlRule?.sl_percent ?? position.sl_percent);
+  const slHit = pnlPercent <= activeSl;
   const earlyTrailArmPct = Number(strat?.early_trail_arm_pct ?? 0);
   const trailingArmed = position.trailing_armed
     || (position.trailing_enabled && tpHit)
@@ -149,6 +181,14 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   // Partial TP check
   if (!exitReason && strat?.partial_tp && !position.partial_tp_done && pnlPercent >= strat.partial_tp_at_percent) {
     db.prepare('UPDATE dry_run_positions SET partial_tp_done = 1 WHERE id = ?').run(position.id);
+    if (!strat.moonbag_on_partial_tp && !position.sl_moved_to_bep) {
+      const currentSl = Number(activeSlRule?.sl_percent ?? position.sl_percent);
+      if (currentSl < 0) {
+        db.prepare('UPDATE tp_sl_rules SET sl_percent = 0, updated_at_ms = ? WHERE position_id = ?').run(now(), position.id);
+        db.prepare('UPDATE dry_run_positions SET sl_moved_to_bep = 1 WHERE id = ?').run(position.id);
+        console.log(`[position] ${position.id} SL → BEP after partial TP`);
+      }
+    }
     console.log(`[position] ${position.id} partial TP at ${pnlPercent.toFixed(1)}% (${strat.partial_tp_sell_percent}% sell)`);
     let partialSellOk = position.execution_mode !== 'live';
     if (position.execution_mode === 'live' && position.token_amount_raw) {
@@ -290,16 +330,33 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
 
 export async function monitorPositions() {
   const positions = openPositions();
+  if (positions.length === 0) return;
+
+  const mints = [...new Set(positions.map(p => p.mint))];
+  let batchPrices = new Map();
+  try {
+    batchPrices = await batchFetchPrices(mints);
+  } catch (err) {
+    console.log(`[monitor] batch price failed: ${err.message}`);
+  }
+
   let walletPnlData = {};
   const pubkey = liveWalletPubkey();
   if (pubkey && positions.some(p => p.execution_mode === 'live')) {
-    walletPnlData = await fetchJupiterWalletPnl(pubkey);
+    walletPnlData = await fetchJupiterWalletPnl(pubkey).catch((err) => {
+      console.log(`[monitor] wallet pnl failed: ${err.message}`);
+      return {};
+    });
   }
   for (const position of positions) {
     const jupiterPnl = position.execution_mode === 'live'
       ? (walletPnlData[position.mint]?.pnl || null)
       : null;
-    const result = await refreshPosition(position, { autoExit: true, jupiterPnl }).catch((err) => {
+    const result = await refreshPosition(position, {
+      autoExit: true,
+      jupiterPnl,
+      cachedBatchPrice: batchPrices.get(position.mint) || null,
+    }).catch((err) => {
       console.log(`[position] ${position.id} ${err.message}`);
       return null;
     });

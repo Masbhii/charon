@@ -78,6 +78,16 @@ function fmtUsd(n) {
   return `$${Math.round(value)}`;
 }
 
+function withTimeout(promise, ms, label = 'operation') {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function quickPrefilter(coin, strat, graduatedMap) {
   const failures = [];
   const gradDate = Number(coin.graduationDate || 0);
@@ -136,6 +146,14 @@ function pickStrategy(strat) {
 
 function appendJsonl(file, row) {
   fs.appendFileSync(file, `${JSON.stringify(row)}\n`);
+}
+
+function safeAppendJsonl(file, row) {
+  try {
+    appendJsonl(file, row);
+  } catch (err) {
+    console.log(`[collect] append failed (${path.basename(file)}): ${err.message}`);
+  }
 }
 
 function candidateMetrics(candidate) {
@@ -216,7 +234,7 @@ if (telegramRequested) {
     console.log('[telegram] disabled: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing');
   } else {
     telegram.enabled = true;
-    telegram.bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
+    telegram.bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false, request: { timeout: 30_000 } });
   }
 }
 
@@ -233,7 +251,11 @@ function telegramExtra(extra = {}) {
 async function sendTelegramMessage(text, extra = {}) {
   if (!telegram.enabled) return null;
   try {
-    return await telegram.bot.sendMessage(telegram.chatId, text, telegramExtra(extra));
+    return await withTimeout(
+      telegram.bot.sendMessage(telegram.chatId, text, telegramExtra(extra)),
+      30_000,
+      'telegram.sendMessage',
+    );
   } catch (err) {
     console.log(`[telegram] message failed: ${err.message}`);
     return null;
@@ -243,10 +265,14 @@ async function sendTelegramMessage(text, extra = {}) {
 async function sendTelegramDocument(file, caption = '') {
   if (!telegram.enabled) return null;
   try {
-    return await telegram.bot.sendDocument(
-      telegram.chatId,
-      file,
-      telegramExtra({ caption: caption.slice(0, 1024) }),
+    return await withTimeout(
+      telegram.bot.sendDocument(
+        telegram.chatId,
+        file,
+        telegramExtra({ caption: caption.slice(0, 1024) }),
+      ),
+      60_000,
+      'telegram.sendDocument',
     );
   } catch (err) {
     console.log(`[telegram] document failed (${path.basename(file)}): ${err.message}`);
@@ -277,6 +303,7 @@ let totalObservations = 0;
 let totalFullChecks = 0;
 let totalFullCheckErrors = 0;
 const startedAtMs = now();
+let scanInProgress = false;
 
 console.log('[collect] graduate_immediate screening collector');
 console.log(`[collect] interval=${intervalMs}ms duration=${durationMs > 0 ? `${durationMs}ms` : 'off'} confirm_pass=${confirmPass} telegram=${telegram.enabled} log_dir=${logDir}`);
@@ -304,12 +331,16 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
 
   const buildStart = Date.now();
   try {
-    const candidate = await buildCandidate({
-      mint,
-      graduatedCoin: coin,
-      route: 'graduate_screening_collect',
-    });
-    appendJsonl(fullChecksFile, {
+    const candidate = await withTimeout(
+      buildCandidate({
+        mint,
+        graduatedCoin: coin,
+        route: 'graduate_screening_collect',
+      }),
+      60_000,
+      `buildCandidate(${mint.slice(0, 8)})`,
+    );
+    safeAppendJsonl(fullChecksFile, {
       type: 'full_check',
       session_id: sessionId,
       tick,
@@ -321,7 +352,7 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
     });
     totalFullChecks += 1;
   } catch (err) {
-    appendJsonl(fullChecksFile, {
+    safeAppendJsonl(fullChecksFile, {
       type: 'full_check_error',
       session_id: sessionId,
       tick,
@@ -371,18 +402,18 @@ async function scanOnce() {
       quick_failures: q.failures,
       source: coin.source || 'graduated_api',
     };
-    appendJsonl(observationsFile, observation);
+    safeAppendJsonl(observationsFile, observation);
     totalObservations += 1;
 
     if (!seenMints.has(mint)) {
       seenMints.add(mint);
-      appendJsonl(eventsFile, { ...observation, type: 'first_seen' });
+      safeAppendJsonl(eventsFile, { ...observation, type: 'first_seen' });
     }
 
     const prevPass = lastQuickPass.get(mint);
     if (prevPass !== q.passed) {
       lastQuickPass.set(mint, q.passed);
-      appendJsonl(eventsFile, {
+      safeAppendJsonl(eventsFile, {
         ...observation,
         type: 'quick_pass_state_change',
         previous_passed_quick: prevPass ?? null,
@@ -392,7 +423,7 @@ async function scanOnce() {
     if (q.passed && !firstPassMints.has(mint)) {
       firstPassMints.add(mint);
       newPassCount += 1;
-      appendJsonl(eventsFile, {
+      safeAppendJsonl(eventsFile, {
         ...observation,
         type: 'quick_pass_first',
         entry_proxy_market_cap_usd: q.marketCapUsd,
@@ -419,7 +450,7 @@ async function scanOnce() {
     unique_seen: seenMints.size,
     unique_quick_pass: firstPassMints.size,
   };
-  appendJsonl(eventsFile, summary);
+  safeAppendJsonl(eventsFile, summary);
 
   if (!quiet) {
     console.log(`[collect] tick=${tick} tracked=${coins.length} quick_pass=${quickPassCount} new_pass=${newPassCount} unique_pass=${firstPassMints.size}`);
@@ -536,7 +567,7 @@ process.on('SIGTERM', () => {
 });
 
 try {
-  await scanOnce();
+  await withTimeout(scanOnce(), 5 * 60_000, 'scanOnce (initial)');
   if (once || maxTicks === 1) await stop(0, once ? 'once' : 'max_ticks');
 
   const scheduleNext = () => {
@@ -550,20 +581,30 @@ try {
       return;
     }
     timer = setTimeout(async () => {
-      try {
-        await scanOnce();
-      } catch (err) {
-        appendJsonl(eventsFile, {
-          type: 'collector_error',
-          session_id: sessionId,
-          tick,
-          observed_at_ms: now(),
-          observed_at_iso: new Date().toISOString(),
-          error: err.message,
-        });
-        console.error(`[collect] error: ${err.message}`);
+      if (scanInProgress) {
+        console.log('[collect] previous scan still running, skipping tick');
+        scheduleNext();
+        return;
       }
-      scheduleNext();
+      scanInProgress = true;
+      try {
+        await withTimeout(scanOnce(), 5 * 60_000, 'scanOnce');
+      } catch (err) {
+        try {
+          safeAppendJsonl(eventsFile, {
+            type: 'collector_error',
+            session_id: sessionId,
+            tick,
+            observed_at_ms: now(),
+            observed_at_iso: new Date().toISOString(),
+            error: err.message,
+          });
+        } catch { /* protect loop recovery */ }
+        console.error(`[collect] error: ${err.message}`);
+      } finally {
+        scanInProgress = false;
+        scheduleNext();
+      }
     }, intervalMs);
   };
 

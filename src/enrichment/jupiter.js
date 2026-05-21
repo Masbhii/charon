@@ -102,6 +102,40 @@ async function fetchSolUsdPrice() {
   }
 }
 
+/** Batch USD prices for open-position monitoring (max 20 mints per request). */
+async function batchFetchPrices(mints) {
+  if (!mints?.length) return new Map();
+  const BATCH_SIZE = 20;
+  const result = new Map();
+  for (let i = 0; i < mints.length; i += BATCH_SIZE) {
+    const chunk = mints.slice(i, i + BATCH_SIZE);
+    try {
+      const res = await axios.get(`https://lite-api.jup.ag/price/v3?ids=${chunk.join(',')}`, {
+        timeout: 8_000,
+        headers: JSON_HEADERS,
+      });
+      const data = res.data || {};
+      for (const mint of chunk) {
+        const row = data[mint];
+        if (row) {
+          result.set(mint, {
+            usdPrice: Number(row.usdPrice ?? 0),
+            mcap: null,
+            liquidity: null,
+            source: 'price_v3',
+            fetchedAt: Date.now(),
+          });
+        }
+      }
+    } catch (err) {
+      if (err.response?.status !== 429) {
+        console.log(`[batch-price] chunk ${i}: ${err.response?.status || ''} ${err.message}`);
+      }
+    }
+  }
+  return result;
+}
+
 async function estimateTokenAmountFromSol(sizeSol, entryPrice) {
   if (!Number.isFinite(Number(entryPrice)) || Number(entryPrice) <= 0) return null;
   const solUsd = await fetchSolUsdPrice();
@@ -239,6 +273,7 @@ export {
   normalizeJupiterTrendingRow,
   fetchJupiterAsset,
   fetchSolUsdPrice,
+  batchFetchPrices,
   estimateTokenAmountFromSol,
   fetchJupiterHolders,
   summarizeCandles,

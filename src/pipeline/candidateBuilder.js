@@ -81,10 +81,11 @@ export function filterCandidate(candidate) {
 
   // Market cap checks
   if (strat.min_mcap_usd > 0 && (!Number.isFinite(mcap) || mcap < strat.min_mcap_usd)) {
-    failures.push(`market cap min: ${mcap} < ${strat.min_mcap_usd}`);
+    const mcapStr = Number.isFinite(mcap) ? `$${Math.round(mcap).toLocaleString('en-US')}` : 'unknown';
+    failures.push(`market cap min: ${mcapStr} < $${Number(strat.min_mcap_usd).toLocaleString('en-US')}`);
   }
   if (strat.max_mcap_usd > 0 && Number.isFinite(mcap) && mcap > strat.max_mcap_usd) {
-    failures.push(`market cap max: ${mcap} > ${strat.max_mcap_usd}`);
+    failures.push(`market cap max: $${Math.round(mcap).toLocaleString('en-US')} > $${Number(strat.max_mcap_usd).toLocaleString('en-US')}`);
   }
 
   const dupMsg = duplicateTickerOgFailure(

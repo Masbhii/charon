@@ -207,6 +207,10 @@ export function initDb() {
   ensureColumn('dry_run_positions', 'token_amount_raw', 'TEXT');
   ensureColumn('dry_run_positions', 'strategy_id', "TEXT DEFAULT 'sniper'");
   ensureColumn('dry_run_positions', 'partial_tp_done', 'INTEGER DEFAULT 0');
+  ensureColumn('dry_run_positions', 'lowest_mcap_after_entry', 'REAL');
+  ensureColumn('dry_run_positions', 'dump_then_recovered', 'INTEGER DEFAULT 0');
+  ensureColumn('dry_run_positions', 'sl_moved_to_bep', 'INTEGER DEFAULT 0');
+  ensureColumn('dry_run_positions', 'dynamic_size_sol', 'REAL');
   ensureColumn('decision_logs', 'strategy_id', 'TEXT');
 
   const defaults = {
@@ -381,7 +385,7 @@ export function initDb() {
     min_source_count: 1,
     require_fee_claim: false,
     token_age_max_ms: 900_000,
-    min_mcap_usd: 15000,
+    min_mcap_usd: 35_000,
     max_mcap_usd: 0,
     min_fee_claim_sol: 0,
     min_gmgn_total_fee_sol: 0,
@@ -401,7 +405,7 @@ export function initDb() {
     trending_max_bundler_rate: 0,
     min_graduated_age_ms: 20_000,
     max_graduated_age_ms: 900_000,
-    min_liquidity_usd: 5_000,
+    min_liquidity_usd: 8_000,
     position_size_sol: 0.1,
     max_open_positions: 2,
     tp_percent: 120,
@@ -466,7 +470,9 @@ function patchGraduateImmediateStrategyConfig() {
     return;
   }
   const patches = {
+    min_mcap_usd: 35_000,
     max_mcap_usd: 0,
+    min_liquidity_usd: 8_000,
     partial_tp_sell_percent: 65,
     moonbag_on_partial_tp: true,
     trailing_enabled: true,
