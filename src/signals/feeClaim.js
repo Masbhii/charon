@@ -8,7 +8,7 @@ import {
   SOLANA_WS_URL,
 } from '../config.js';
 import { now, pruneSeen, lamToSol, discMatch, parseDistFees, readPubkeyFromBuffer } from '../utils.js';
-import { numSetting, boolSetting } from '../db/settings.js';
+import { numSetting, boolSetting, strategyById } from '../db/settings.js';
 import { storeSignalEvent } from './trending.js';
 import { graduated } from './graduated.js';
 import { trending } from './trending.js';
@@ -49,15 +49,30 @@ export async function handleMigrateEvent(data, signature) {
     });
   }
 
-  if (candidateHandler) {
-    await candidateHandler({
-      mint,
-      fee: null,
-      signature,
-      graduatedCoin: graduated.get(mint),
-      trendingToken: null,
-      route: 'migrate_immediate',
+  if (!candidateHandler) return;
+
+  const strat = strategyById('graduate_immediate');
+  const minAgeMs = Math.max(0, Number(strat?.min_graduated_age_ms ?? 20_000));
+  const payload = {
+    mint,
+    fee: null,
+    signature,
+    graduatedCoin: graduated.get(mint),
+    trendingToken: null,
+    route: 'migrate_immediate',
+  };
+
+  const runCandidate = () => {
+    candidateHandler(payload).catch((err) => {
+      console.log(`[migrate] candidate handler error: ${err.message}`);
     });
+  };
+
+  if (minAgeMs > 0) {
+    console.log(`[migrate] check in ${minAgeMs / 1000}s (min_graduated_age_ms)`);
+    setTimeout(runCandidate, minAgeMs);
+  } else {
+    await runCandidate();
   }
 }
 
