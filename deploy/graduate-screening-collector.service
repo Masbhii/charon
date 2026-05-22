@@ -1,0 +1,29 @@
+# systemd unit — graduate screening collector (survives reboot with enable)
+#
+# Install on VPS:
+#   sudo cp deploy/graduate-screening-collector.service /etc/systemd/system/
+#   sudo sed -i "s|/home/USER/charon|$(pwd)|g" /etc/systemd/system/graduate-screening-collector.service
+#   sudo sed -i "s|User=USER|User=$USER|g" /etc/systemd/system/graduate-screening-collector.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now graduate-screening-collector
+#
+# Logs: journalctl -u graduate-screening-collector -f
+
+[Unit]
+Description=Charon graduate_immediate screening collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=USER
+WorkingDirectory=/home/USER/charon
+EnvironmentFile=-/home/USER/charon/.env
+ExecStart=/usr/bin/node scripts/collect-graduate-screening.mjs --interval 5000 --verbose --confirm-pass --telegram
+Restart=on-failure
+RestartSec=15
+StandardOutput=append:/home/USER/charon/data/graduate-screening/collector.log
+StandardError=append:/home/USER/charon/data/graduate-screening/collector.log
+
+[Install]
+WantedBy=multi-user.target

@@ -8,6 +8,9 @@
  *   node scripts/watch-graduate-screening.mjs --confirm-full   # Jupiter confirm untuk PASS quick
  *
  * Ctrl+C untuk stop.
+ *
+ * Background (tetap jalan setelah tutup terminal):
+ *   node scripts/graduate-screening-daemon.mjs start --watch -- --interval 5000 --confirm-full
  */
 import dotenv from 'dotenv';
 dotenv.config();
@@ -186,9 +189,18 @@ const timer = setInterval(() => {
   scanOnce().catch(err => console.error('[watch] error:', err.message));
 }, intervalMs);
 
+process.on('SIGHUP', () => {
+  console.log('[watch] SIGHUP ignored (use graduate-screening-daemon.mjs start --watch)');
+});
+
 process.on('SIGINT', () => {
   clearInterval(timer);
   setActiveStrategy(prevId);
   console.log(`\n[watch] stopped. Strategi dikembalikan ke: ${prevId}`);
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  clearInterval(timer);
+  setActiveStrategy(prevId);
   process.exit(0);
 });

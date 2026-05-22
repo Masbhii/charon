@@ -11,6 +11,12 @@
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --confirm-pass --telegram
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --telegram --verbose
  *   node scripts/collect-graduate-screening.mjs --once --confirm-pass
+ *
+ * Tetap jalan setelah tutup terminal/SSH (jangan jalankan foreground langsung):
+ *   node scripts/graduate-screening-daemon.mjs start -- --interval 5000 --verbose --confirm-pass --telegram
+ *   node scripts/graduate-screening-daemon.mjs status
+ *   node scripts/graduate-screening-daemon.mjs stop
+ *   tail -f data/graduate-screening/collector.log
  */
 import dotenv from 'dotenv';
 dotenv.config();
@@ -622,18 +628,20 @@ async function stop(code = 0, reason = 'stopped') {
   }
 }
 
-process.on('SIGINT', () => {
-  stop(0, 'SIGINT').catch(err => {
+function handleStopSignal(signal) {
+  stop(0, signal).catch(err => {
     console.error(`[collect] stop failed: ${err.message}`);
     process.exit(1);
   });
+}
+
+// Tutup terminal SSH mengirim SIGHUP — abaikan agar proses tidak mati (pakai daemon spawn detached tetap disarankan).
+process.on('SIGHUP', () => {
+  console.log('[collect] SIGHUP ignored (use graduate-screening-daemon.mjs start for detached runs)');
 });
-process.on('SIGTERM', () => {
-  stop(0, 'SIGTERM').catch(err => {
-    console.error(`[collect] stop failed: ${err.message}`);
-    process.exit(1);
-  });
-});
+
+process.on('SIGINT', () => handleStopSignal('SIGINT'));
+process.on('SIGTERM', () => handleStopSignal('SIGTERM'));
 
 try {
   await withTimeout(scanOnce(), 5 * 60_000, 'scanOnce (initial)');

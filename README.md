@@ -187,6 +187,24 @@ Charon uses `charon.sqlite` as source of truth. It stores:
 
 Open positions resume monitoring after restart.
 
+## Graduate screening (VPS testing, survives SSH disconnect)
+
+Jangan jalankan `node scripts/collect-graduate-screening.mjs` langsung di foreground — proses mati saat terminal/SSH ditutup (SIGHUP).
+
+Gunakan daemon (detached + PID + log):
+
+```bash
+cd ~/charon
+node scripts/graduate-screening-daemon.mjs start -- --interval 5000 --verbose --confirm-pass --telegram
+node scripts/graduate-screening-daemon.mjs status
+tail -f data/graduate-screening/collector.log
+node scripts/graduate-screening-daemon.mjs stop
+```
+
+Atau npm: `npm run screening:start` (default args), `npm run screening:status`, `npm run screening:stop`.
+
+Opsional systemd (auto-restart + boot): lihat `deploy/graduate-screening-collector.service`.
+
 ## Verification
 
 ```bash

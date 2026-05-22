@@ -5,7 +5,11 @@
   "private": true,
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js && node --check src/app.js && node --check src/config.js && node --check src/liveExecutor.js"
+    "check": "node --check index.js && node --check src/app.js && node --check src/config.js && node --check src/liveExecutor.js",
+    "screening:start": "node scripts/graduate-screening-daemon.mjs start",
+    "screening:stop": "node scripts/graduate-screening-daemon.mjs stop",
+    "screening:status": "node scripts/graduate-screening-daemon.mjs status",
+    "screening:log": "node scripts/graduate-screening-daemon.mjs log"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
