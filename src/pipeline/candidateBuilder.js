@@ -211,9 +211,15 @@ export function filterCandidate(candidate) {
     }
   }
 
-  // Holder count
-  if (strat.min_holders > 0 && holderCount < strat.min_holders) {
-    failures.push(`holders: ${holderCount} < ${strat.min_holders}`);
+  // Holder count — grace window after migrate (holders still accumulating)
+  if (strat.min_holders > 0) {
+    const gradDate = Number(candidate.graduation?.graduationDate || 0);
+    const gradAgeMs = gradDate > 0 ? now() - gradDate : null;
+    const graceMs = Number(strat.min_holders_grace_ms ?? 0);
+    const inGrace = gradAgeMs != null && graceMs > 0 && gradAgeMs < graceMs;
+    if (!inGrace && holderCount < strat.min_holders) {
+      failures.push(`holders: ${holderCount} < ${strat.min_holders}`);
+    }
   }
 
   // Liquidity minimum - filter token yang praktis tidak bisa dijual

@@ -42,8 +42,10 @@ export function filtersText() {
     strat.min_graduated_age_ms > 0 || strat.max_graduated_age_ms > 0
       ? `Grad age: ${strat.min_graduated_age_ms / 1000}s – ${strat.max_graduated_age_ms > 0 ? `${strat.max_graduated_age_ms / 1000}s` : '∞'}`
       : null,
-    `Min holders: ${strat.min_holders || 'off'}`,
-    `Max holder: ${strat.max_top20_holder_percent < 100 ? fmtPct(strat.max_top20_holder_percent) : 'off'}`,
+    strat.min_holders > 0
+      ? `Min holders: ${strat.min_holders}${strat.min_holders_grace_ms > 0 ? ` (grace ${Math.round(strat.min_holders_grace_ms / 1000)}s)` : ''}`
+      : 'Min holders: off',
+    `Max top holder: ${strat.max_top20_holder_percent < 100 ? fmtPct(strat.max_top20_holder_percent) : 'off'}`,
     `Min saved holders: ${strat.min_saved_wallet_holders || 'off'}`,
     strat.max_ath_distance_pct < 0 ? `Max ATH distance: ${strat.max_ath_distance_pct}%` : null,
     '',
@@ -85,6 +87,7 @@ export const strategyNumericLabels = {
   min_volume_1h_usd: 'minimum 1h volume USD (Jupiter stats1h)',
   max_volume_1h_usd: 'maximum 1h volume USD (Jupiter stats1h)',
   min_holders: 'minimum holders',
+  min_holders_grace_ms: 'skip min_holders for this many ms after graduate (e.g. 180000 = 3m)',
   max_top20_holder_percent: 'maximum top holder percent',
   max_bundle_single_holder_percent: 'max % single largest holder (0=off; anti-cartel)',
   max_bundle_top4_combined_percent: 'max combined % top 4 holders (0=off; anti-cartel)',
