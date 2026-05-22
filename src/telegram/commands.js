@@ -27,7 +27,6 @@ import {
   positionButtons,
   strategyMenuText,
   strategyKeyboard,
-  agentKeyboard,
 } from './menus.js';
 import { sendTelegram, sendBatch, sendPositionOpen } from './send.js';
 import { candidateSummary, formatPosition } from './format.js';
