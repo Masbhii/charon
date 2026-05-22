@@ -1,6 +1,8 @@
 import { escapeHtml, fmtPct, fmtSol, fmtUsd, short } from '../format.js';
 import { numSetting, boolSetting, setting, activeStrategy, allStrategies } from '../db/settings.js';
 import { openPositionCount, tradingMode, allPositions } from '../db/positions.js';
+import { isAgentEnabled } from '../tradingControl.js';
+import { liveWalletPubkey } from '../liveExecutor.js';
 import { savedWallets } from '../enrichment/wallets.js';
 import { gmgnStatusText } from '../enrichment/gmgn.js';
 import { formatPosition } from './format.js';
@@ -133,7 +135,7 @@ export function agentText() {
   return [
     '🛶 <b>Charon Agent</b>',
     `Strategy: <b>${escapeHtml(strat.name)}</b>`,
-    `Agent: <b>${boolSetting('agent_enabled', true) ? 'on' : 'off'}</b>`,
+    `Entries: <b>${isAgentEnabled() ? 'RUNNING' : 'STOPPED'}</b>`,
     `Mode: <b>${escapeHtml(tradingMode())}</b>`,
     `LLM: <b>${strat.use_llm && ENABLE_LLM && LLM_API_KEY ? 'configured' : 'disabled'}</b>`,
     `Confidence: ${fmtPct(strat.llm_min_confidence || numSetting('llm_min_confidence', 75))}`,
@@ -150,7 +152,15 @@ export function agentKeyboard() {
   return {
     reply_markup: {
       inline_keyboard: [
-        [{ text: 'Toggle Agent', callback_data: 'toggle:agent' }],
+        [
+          { text: '▶ Start', callback_data: 'control:start' },
+          { text: '⏹ Stop', callback_data: 'control:stop' },
+        ],
+        [
+          { text: '0.05 SOL', callback_data: 'control:size:0.05' },
+          { text: '0.1 SOL', callback_data: 'control:size:0.1' },
+          { text: '0.2 SOL', callback_data: 'control:size:0.2' },
+        ],
         [
           { text: 'Dry Run', callback_data: 'set:trading_mode:dry_run' },
           { text: 'Confirm', callback_data: 'set:trading_mode:confirm' },
@@ -188,7 +198,17 @@ export function navKeyboard(rows = []) {
 }
 
 export function mainMenuText() {
-  return `🛶 <b>Charon</b>\nDry-run trench agent online.`;
+  const mode = tradingMode();
+  const entries = isAgentEnabled() ? 'RUNNING' : 'STOPPED';
+  const strat = activeStrategy();
+  return [
+    '🛶 <b>Charon</b>',
+    `Entries: <b>${entries}</b> · Mode: <b>${mode}</b>`,
+    `Strategy: ${escapeHtml(strat.name)} · Size: ${fmtSol(strat.position_size_sol)} SOL`,
+    mode === 'live' && liveWalletPubkey() ? `Wallet: <code>${escapeHtml(liveWalletPubkey())}</code>` : null,
+    '',
+    '/status · /start · /stop · /size · /menu',
+  ].filter(Boolean).join('\n');
 }
 
 export function walletsText() {

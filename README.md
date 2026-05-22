@@ -187,6 +187,23 @@ Charon uses `charon.sqlite` as source of truth. It stores:
 
 Open positions resume monitoring after restart.
 
+## Live trading (quick setup)
+
+1. Set in `.env`: `SOLANA_PRIVATE_KEY`, `JUPITER_API_KEY`, `HELIUS_API_KEY` (or RPC URLs), `TRADING_MODE=live` (optional — can switch via Telegram).
+2. `npm start` (or PM2).
+3. Telegram: `/status` → `/live` (or Agent menu → **Live**) → `/start` when ready.
+4. Adjust size: `/size 0.1` or Agent menu size buttons (base SOL; live also uses dynamic sizing from wallet balance).
+5. Pause entries: `/stop` — open positions still monitored for TP/SL.
+
+| Command | Action |
+|---------|--------|
+| `/start` | Resume new auto entries |
+| `/stop` | Pause new entries (monitoring continues) |
+| `/status` | Mode, wallet, balance, readiness |
+| `/size 0.15` | Set `position_size_sol` on active strategy |
+| `/live` | Live mode (requires wallet + Jupiter) |
+| `/dryrun` | Dry-run mode |
+
 ## Graduate screening (VPS testing, survives SSH disconnect)
 
 Jangan jalankan `node scripts/collect-graduate-screening.mjs` langsung di foreground — proses mati saat terminal/SSH ditutup (SIGHUP).

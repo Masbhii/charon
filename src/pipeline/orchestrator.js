@@ -24,6 +24,11 @@ setDegenHandler(maybeProcessDegenCandidate);
 setCandidateHandler(processCandidateFromSignals);
 
 export async function processCandidateFromSignals(signals) {
+  if (!boolSetting('agent_enabled', true)) {
+    console.log(`[agent] stopped — skipping ${signals.mint?.slice(0, 8) || '?'}...`);
+    return;
+  }
+
   // Skip if max positions reached — don't waste enrichment/LLM calls
   if (!canOpenMorePositions()) {
     const max = numSetting('max_open_positions', 3);

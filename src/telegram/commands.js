@@ -1,5 +1,12 @@
 import { bot } from './bot.js';
 import { TELEGRAM_CHAT_ID } from '../config.js';
+import { isAuthorizedChat, unauthorizedMessage } from './auth.js';
+import {
+  buildTradingStatusText,
+  setAgentEnabled,
+  trySetPositionSizeSol,
+  trySetTradingMode,
+} from '../tradingControl.js';
 import { now, json } from '../utils.js';
 import { escapeHtml, fmtPct } from '../format.js';
 import { db } from '../db/connection.js';
@@ -20,6 +27,7 @@ import {
   positionButtons,
   strategyMenuText,
   strategyKeyboard,
+  agentKeyboard,
 } from './menus.js';
 import { sendTelegram, sendBatch, sendPositionOpen } from './send.js';
 import { candidateSummary, formatPosition } from './format.js';
@@ -33,8 +41,46 @@ import { fetchWalletPnl } from '../enrichment/wallets.js';
 export async function handleMessage(msg) {
   const text = (msg.text || '').trim();
   const chatId = msg.chat.id;
+  if (!isAuthorizedChat(chatId)) {
+    if (text.startsWith('/')) return bot.sendMessage(chatId, unauthorizedMessage());
+    return;
+  }
   if (await consumeNumericFilterInput(chatId, text, msg.message_id)) return;
   if (!text.startsWith('/')) return;
+
+  if (text.startsWith('/start') || text.startsWith('/tradeon')) {
+    setAgentEnabled(true);
+    return bot.sendMessage(chatId, '▶️ <b>Trading started</b> — new entries enabled.\n\n' + await buildTradingStatusText(), { parse_mode: 'HTML' });
+  }
+  if (text.startsWith('/stop') || text.startsWith('/tradeoff')) {
+    setAgentEnabled(false);
+    return bot.sendMessage(chatId, '⏹ <b>Trading stopped</b> — no new auto entries. Open positions still monitored.\n\n' + await buildTradingStatusText(), { parse_mode: 'HTML' });
+  }
+  if (text.startsWith('/status')) {
+    return bot.sendMessage(chatId, await buildTradingStatusText(), { parse_mode: 'HTML', ...menuKeyboard() });
+  }
+  if (text.startsWith('/size')) {
+    const value = text.split(/\s+/)[1];
+    if (!value) {
+      const strat = activeStrategy();
+      return bot.sendMessage(chatId, `Usage: /size &lt;sol&gt;\n\nCurrent (${escapeHtml(strat.name)}): <b>${strat.position_size_sol} SOL</b>\nExample: /size 0.1`, { parse_mode: 'HTML' });
+    }
+    const result = trySetPositionSizeSol(value);
+    if (!result.ok) return bot.sendMessage(chatId, result.error);
+    return bot.sendMessage(chatId, `Position size → <b>${result.sol} SOL</b> (${escapeHtml(result.strategyName)})`, { parse_mode: 'HTML' });
+  }
+  if (text.startsWith('/live')) {
+    const result = trySetTradingMode('live');
+    if (!result.ok) {
+      return bot.sendMessage(chatId, `Cannot enable live:\n${result.errors.map(e => `• ${escapeHtml(e)}`).join('\n')}\n\nAdd keys to .env and restart bot.`, { parse_mode: 'HTML' });
+    }
+    return bot.sendMessage(chatId, '🔴 <b>Live mode ON</b>\n\n' + await buildTradingStatusText(), { parse_mode: 'HTML', ...agentKeyboard() });
+  }
+  if (text.startsWith('/dryrun')) {
+    trySetTradingMode('dry_run');
+    return bot.sendMessage(chatId, '🧪 <b>Dry run mode</b>\n\n' + await buildTradingStatusText(), { parse_mode: 'HTML', ...agentKeyboard() });
+  }
+
   if (text.startsWith('/menu')) return sendMenu(chatId);
   if (text.startsWith('/positions')) return sendPositions(chatId);
   if (text.startsWith('/filters')) return bot.sendMessage(chatId, filtersText(), { parse_mode: 'HTML' });
@@ -239,6 +285,12 @@ export async function toggleTrailing(chatId, id, query = null) {
 export function setupTelegram() {
   bot.setMyCommands([
     { command: 'menu', description: 'Open Charon menu' },
+    { command: 'status', description: 'Bot status (mode, size, wallet)' },
+    { command: 'start', description: 'Resume new trade entries' },
+    { command: 'stop', description: 'Pause new trade entries' },
+    { command: 'size', description: 'Set position size SOL (e.g. /size 0.1)' },
+    { command: 'live', description: 'Switch to live mode (needs wallet key)' },
+    { command: 'dryrun', description: 'Switch to dry-run mode' },
     { command: 'strategy', description: 'Show/switch strategy' },
     { command: 'stratset', description: 'Set strategy config (stratset id key value)' },
     { command: 'positions', description: 'Show dry-run positions' },

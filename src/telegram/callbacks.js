@@ -1,5 +1,8 @@
 import { bot } from './bot.js';
 import { TELEGRAM_CHAT_ID } from '../config.js';
+import { isAuthorizedChat, unauthorizedMessage } from './auth.js';
+import { setAgentEnabled, trySetPositionSizeSol, trySetTradingMode } from '../tradingControl.js';
+import { getLiveReadinessErrors } from '../liveReadiness.js';
 import { now } from '../utils.js';
 import { numSetting, boolSetting, setSetting, setActiveStrategy, activeStrategy, updateStrategyConfig } from '../db/settings.js';
 import {
@@ -29,6 +32,10 @@ import { requestNumericFilterInput, requestStrategyNumericInput } from './input.
 export async function handleCallback(query) {
   const data = query.data || '';
   const chatId = query.message?.chat?.id || TELEGRAM_CHAT_ID;
+  if (!isAuthorizedChat(chatId)) {
+    await answerCallback(query, 'Unauthorized');
+    return bot.sendMessage(chatId, unauthorizedMessage());
+  }
   await answerCallback(query);
   if (!data.startsWith('input:') && !data.startsWith('stratinput:')) {
     const { pendingNumericInputs } = await import('./input.js');
@@ -42,6 +49,20 @@ export async function handleCallback(query) {
   }
   if (data === 'toggle:agent') {
     setSetting('agent_enabled', boolSetting('agent_enabled', true) ? 'false' : 'true');
+    return editMenuMessage(query, agentText(), agentKeyboard());
+  }
+  if (data === 'control:start') {
+    setAgentEnabled(true);
+    return editMenuMessage(query, agentText(), agentKeyboard());
+  }
+  if (data === 'control:stop') {
+    setAgentEnabled(false);
+    return editMenuMessage(query, agentText(), agentKeyboard());
+  }
+  if (data.startsWith('control:size:')) {
+    const sol = data.split(':')[2];
+    const result = trySetPositionSizeSol(sol);
+    if (!result.ok) return bot.sendMessage(chatId, result.error);
     return editMenuMessage(query, agentText(), agentKeyboard());
   }
   if (data === 'toggle:trending_enabled' || data === 'toggle:trending_allow_degen') {
@@ -102,6 +123,10 @@ export async function handleCallback(query) {
     const decisionId = storeDecision(row.id, candidate, decision);
     decision.id = decisionId;
     if (tradingMode() === 'live') {
+      const liveErrors = getLiveReadinessErrors();
+      if (liveErrors.length) {
+        return bot.sendMessage(chatId, `Live not ready:\n${liveErrors.join('\n')}`, { parse_mode: 'HTML' });
+      }
       await executeLiveBuy(row, decision, 'manual', [row], row.id);
       return;
     }
@@ -171,7 +196,7 @@ const STRAT_PRESETS = {
   min_holders: [0, 100, 500, 1000, 2000, 5000],
   llm_min_confidence: [0, 30, 50, 60, 70, 80, 90],
   partial_tp_at_percent: [25, 50, 75, 100, 150, 200],
-  partial_tp_sell_percent: [25, 33, 50, 75],
+  partial_tp_sell_percent: [25, 50, 65, 80, 90],
   max_hold_ms: [0, 1800000, 3600000, 7200000, 14400000, 28800000, 86400000],
   min_fee_claim_sol: [0, 0.5, 1, 2, 5, 10],
   min_gmgn_total_fee_sol: [0, 3, 5, 10, 20],
@@ -250,7 +275,14 @@ async function updateSettingFromButton(query, key, value) {
     'default_trailing_percent',
   ]);
   if (!valid.has(key) || value == null) return bot.sendMessage(chatId, 'Unknown setting.');
-  setSetting(key, value);
+  if (key === 'trading_mode') {
+    const result = trySetTradingMode(value);
+    if (!result.ok) {
+      return bot.sendMessage(chatId, `Cannot set live mode:\n${result.errors.join('\n')}\n\nFix .env and restart bot.`);
+    }
+  } else {
+    setSetting(key, value);
+  }
   const text = key.startsWith('default_') || key === 'dry_run_buy_sol' || key === 'trading_mode' || key === 'llm_min_confidence' || key === 'llm_candidate_pick_count' || key === 'llm_candidate_max_age_ms' || key === 'max_open_positions'
     ? agentText()
     : filtersText();
