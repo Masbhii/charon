@@ -9,6 +9,7 @@
  *   node scripts/collect-graduate-screening.mjs --interval 5000
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --confirm-pass
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --confirm-pass --telegram
+ * Telegram: alert on first quick PASS per mint; optional follow-up when full Jupiter passes.
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --telegram --verbose
  *   node scripts/collect-graduate-screening.mjs --once --confirm-pass
  *
@@ -265,14 +266,30 @@ function telegramExtra(extra = {}) {
 
 async function sendTelegramMessage(text, extra = {}) {
   if (!telegram.enabled) return null;
+  const payload = text.length > 4000 ? `${text.slice(0, 3990)}…` : text;
   try {
     return await withTimeout(
-      telegram.bot.sendMessage(telegram.chatId, text, telegramExtra(extra)),
+      telegram.bot.sendMessage(telegram.chatId, payload, telegramExtra(extra)),
       30_000,
       'telegram.sendMessage',
     );
   } catch (err) {
     console.log(`[telegram] message failed: ${err.message}`);
+    if (/parse entities|can't parse/i.test(err.message)) {
+      try {
+        return await withTimeout(
+          telegram.bot.sendMessage(telegram.chatId, payload.replace(/<[^>]+>/g, ''), {
+            disable_web_page_preview: true,
+            ...(Number(telegram.topicId) > 0 ? { message_thread_id: Number(telegram.topicId) } : {}),
+            ...extra,
+          }),
+          30_000,
+          'telegram.sendMessage(plain)',
+        );
+      } catch (retryErr) {
+        console.log(`[telegram] plain retry failed: ${retryErr.message}`);
+      }
+    }
     return null;
   }
 }
@@ -295,24 +312,38 @@ async function sendTelegramDocument(file, caption = '') {
   }
 }
 
-function passAlertText(observation) {
-  return [
+function passAlertText(observation, fullFilter = null) {
+  const lines = [
     '<b>Graduate Immediate PASS</b>',
     '',
     `Symbol: <b>${escapeHtml(observation.symbol || '?')}</b>`,
     `CA: <code>${escapeHtml(observation.mint)}</code>`,
     `Age: <b>${escapeHtml(fmtAge(observation.age_ms))}</b> since graduate`,
     `Mcap: <b>${escapeHtml(fmtUsd(observation.market_cap_usd_pump))}</b> Pump`,
-    `Session: <code>${escapeHtml(sessionId.slice(0, 19))}</code>`,
-    '',
-    '<i>Screening-only collector. No buy/sell executed.</i>',
-  ].join('\n');
+  ];
+  if (fullFilter?.passed) {
+    if (fullFilter.hqs?.score != null) lines.push(`HQS: <b>${fullFilter.hqs.score}/100</b>`);
+    if (fullFilter.rugcheck?.displayScore != null) {
+      lines.push(`RugCheck: <b>${fullFilter.rugcheck.displayScore}/100</b>`);
+    }
+    lines.push('', '<i>Quick + Jupiter full check passed.</i>');
+  } else if (confirmPass && fullFilter && !fullFilter.passed) {
+    const fail = (fullFilter.failures || []).slice(0, 4).join('; ') || 'full check failed';
+    lines.push('', `<i>Quick PASS — full check FAIL: ${escapeHtml(fail)}</i>`);
+  } else {
+    lines.push('', '<i>Quick PASS (Pump API). Full Jupiter check pending or skipped.</i>');
+  }
+  lines.push(`Session: <code>${escapeHtml(sessionId.slice(0, 19))}</code>`);
+  lines.push('', '<i>Screening-only collector. No buy/sell executed.</i>');
+  return lines.join('\n');
 }
 
 const seenMints = new Set();
-const firstPassMints = new Set();
+const firstPassAlertMints = new Set();
+const firstFullPassAlertMints = new Set();
 const lastQuickPass = new Map();
 const lastFullCheckAt = new Map();
+const lastFullCheckResult = new Map();
 let tick = 0;
 let totalObservations = 0;
 let totalFullChecks = 0;
@@ -349,7 +380,11 @@ await sendTelegramMessage([
 async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
   if (!confirmPass) return null;
   const lastAt = lastFullCheckAt.get(mint) || 0;
-  if (observedAtMs - lastAt < fullRefreshMs) return null;
+  if (observedAtMs - lastAt < fullRefreshMs) {
+    const cached = lastFullCheckResult.get(mint);
+    if (cached) return { ...cached, throttled: true };
+    return { passed: false, failures: ['full check pending (refresh soon)'], hqs: null, rugcheck: null, throttled: true };
+  }
   lastFullCheckAt.set(mint, observedAtMs);
 
   const buildStart = Date.now();
@@ -382,6 +417,7 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
       ...candidateMetrics(candidate),
     });
     totalFullChecks += 1;
+    lastFullCheckResult.set(mint, full);
     return full;
   } catch (err) {
     safeAppendJsonl(fullChecksFile, {
@@ -395,8 +431,21 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
       error: err.message,
     });
     totalFullCheckErrors += 1;
-    return { passed: false, failures: [err.message], hqs: null };
+    const failed = { passed: false, failures: [err.message], hqs: null, rugcheck: null };
+    lastFullCheckResult.set(mint, failed);
+    return failed;
   }
+}
+
+async function sendPassTelegram(observation, fullFilter, kind) {
+  if (!telegram.enabled) return false;
+  const text = passAlertText(observation, fullFilter);
+  const sent = await sendTelegramMessage(text);
+  if (sent) {
+    console.log(`[telegram] ${kind} alert sent: ${observation.symbol || '?'} ${observation.mint.slice(0, 8)}...`);
+    return true;
+  }
+  return false;
 }
 
 async function scanOnce() {
@@ -427,13 +476,21 @@ async function scanOnce() {
 
     if (verbose) {
       const reasons = [...q.failures];
-      if (fullFilter && !fullFilter.passed) {
-        reasons.push(...fullFilter.failures);
+      if (q.passed && fullFilter && !fullFilter.passed) {
+        reasons.push(...(fullFilter.failures || []));
+      } else if (q.passed && confirmPass && fullFilter?.throttled) {
+        reasons.push('full check cached (throttled)');
+      } else if (q.passed && confirmPass && !fullFilter) {
+        reasons.push('full check pending');
       }
+      const fullOk = fullFilter?.passed === true;
+      const displayPass = q.passed && (!confirmPass || fullOk);
+      const quickOnlyPass = q.passed && confirmPass && !fullOk;
       const row = {
         symbol: coin.ticker || coin.symbol || '?',
         mint,
-        pass: confirmPass ? (q.passed && (fullFilter?.passed ?? false)) : q.passed,
+        pass: displayPass,
+        quickOnlyPass,
         age: fmtAge(q.ageMs),
         mcapPump: fmtUsd(q.marketCapUsd),
         reasons,
@@ -479,24 +536,45 @@ async function scanOnce() {
       });
     }
 
-    const passForAlert = confirmPass ? (q.passed && fullFilter?.passed) : q.passed;
-    if (passForAlert && !firstPassMints.has(mint)) {
-      firstPassMints.add(mint);
+    if (q.passed && !firstPassAlertMints.has(mint)) {
+      firstPassAlertMints.add(mint);
       newPassCount += 1;
       safeAppendJsonl(eventsFile, {
         ...observation,
         type: 'quick_pass_first',
         entry_proxy_market_cap_usd: q.marketCapUsd,
         entry_proxy_age_ms: q.ageMs,
+        full_passed: fullFilter?.passed ?? null,
       });
-      await sendTelegramMessage(passAlertText(observation));
+      await sendPassTelegram(observation, fullFilter, 'quick PASS');
       if (verbose) {
-        console.log('\n🟢 ═══ LULUS FILTER (BARU) → Telegram terkirim ═══');
+        console.log('\n🟢 ═══ QUICK PASS (BARU) → Telegram terkirim ═══');
         console.log(`   Symbol : ${observation.symbol || '?'}`);
         console.log(`   CA     : ${mint}`);
         console.log(`   Umur   : ${fmtAge(observation.age_ms)} sejak graduate`);
         console.log(`   Mcap   : Pump ${fmtUsd(observation.market_cap_usd_pump)}`);
+        if (fullFilter?.passed) console.log('   Full   : Jupiter check PASS');
+        else if (fullFilter && !fullFilter.passed) {
+          console.log(`   Full   : FAIL — ${(fullFilter.failures || []).join('; ')}`);
+        }
         console.log('══════════════════════════════\n');
+      }
+    } else if (
+      confirmPass
+      && q.passed
+      && fullFilter?.passed
+      && firstPassAlertMints.has(mint)
+      && !firstFullPassAlertMints.has(mint)
+    ) {
+      firstFullPassAlertMints.add(mint);
+      safeAppendJsonl(eventsFile, {
+        ...observation,
+        type: 'full_pass_first',
+        entry_proxy_market_cap_usd: q.marketCapUsd,
+      });
+      await sendPassTelegram(observation, fullFilter, 'full PASS');
+      if (verbose) {
+        console.log(`\n🟢 Full Jupiter PASS → Telegram follow-up: ${observation.symbol || '?'} ${mint.slice(0, 8)}...\n`);
       }
     }
 
@@ -513,7 +591,8 @@ async function scanOnce() {
     quick_fail: coins.length - quickPassCount,
     new_quick_pass: newPassCount,
     unique_seen: seenMints.size,
-    unique_quick_pass: firstPassMints.size,
+    unique_quick_pass: firstPassAlertMints.size,
+    unique_full_pass: firstFullPassAlertMints.size,
   };
   safeAppendJsonl(eventsFile, summary);
 
@@ -521,7 +600,7 @@ async function scanOnce() {
     console.log(`\n[${observedAtIso}] tick #${tick} | tracked=${coins.length} | quick PASS=${quickPassCount} | FAIL=${coins.length - quickPassCount}`);
     console.log('── Semua token dianalisa (CA lengkap) ──');
     for (const r of analyzed) {
-      const status = r.pass ? '✓ PASS' : '✗ FAIL';
+      const status = r.pass ? '✓ PASS' : (r.quickOnlyPass ? '◐ QUICK' : '✗ FAIL');
       const hqsStr = r.hqs ? ` hqs=${r.hqs}` : '';
       const rcStr = r.rugcheck ? ` rc=${r.rugcheck}` : '';
       const reason = r.reasons.length ? ` | ${r.reasons.join('; ')}` : '';
@@ -533,7 +612,7 @@ async function scanOnce() {
     }
     console.log(`[graduated] tick #${tick} complete | new_pass_this_tick=${newPassCount}`);
   } else if (!quiet) {
-    console.log(`[collect] tick=${tick} tracked=${coins.length} quick_pass=${quickPassCount} new_pass=${newPassCount} unique_pass=${firstPassMints.size}`);
+    console.log(`[collect] tick=${tick} tracked=${coins.length} quick_pass=${quickPassCount} new_pass=${newPassCount} unique_pass=${firstPassAlertMints.size}`);
   }
 }
 
@@ -564,7 +643,8 @@ function writeSummary(stopReason) {
     tick_count: tick,
     total_observations: totalObservations,
     unique_seen: seenMints.size,
-    unique_quick_pass: firstPassMints.size,
+    unique_quick_pass: firstPassAlertMints.size,
+    unique_full_pass: firstFullPassAlertMints.size,
     total_full_checks: totalFullChecks,
     total_full_check_errors: totalFullCheckErrors,
     files: session.files,
