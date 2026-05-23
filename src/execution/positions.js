@@ -156,8 +156,9 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
 
   const highWaterMcap = Math.max(Number(position.high_water_mcap || 0), currentMcap);
   const highWaterPrice = Math.max(Number(position.high_water_price || 0), Number(price || 0));
+  const entrySol = Number(position.dynamic_size_sol ?? position.size_sol);
   let pnlPercent = (currentMcap / entryMcap - 1) * 100;
-  let pnlSol = Number(position.size_sol) * pnlPercent / 100;
+  let pnlSol = entrySol * pnlPercent / 100;
   if (jupiterPnl && Number.isFinite(Number(jupiterPnl.totalPnlPercentageNative))) {
     pnlPercent = Number(jupiterPnl.totalPnlPercentageNative);
     pnlSol = Number.isFinite(Number(jupiterPnl.totalPnlNative)) ? Number(jupiterPnl.totalPnlNative) : pnlSol;
@@ -271,8 +272,8 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
     const receivedLamports = Number(sell.outputAmount || 0);
     const receivedSol = receivedLamports > 0 ? receivedLamports / 1_000_000_000 : null;
     if (receivedSol != null) {
-      finalPnlSol = receivedSol - Number(position.size_sol);
-      finalPnlPercent = (receivedSol / Number(position.size_sol) - 1) * 100;
+      finalPnlSol = receivedSol - entrySol;
+      finalPnlPercent = (receivedSol / entrySol - 1) * 100;
     }
     db.prepare(`
       UPDATE dry_run_positions

@@ -6,7 +6,9 @@ import { storeDecision, storeBatchDecision, logDecisionEvent } from '../db/decis
 import { buildCandidate, filterCandidate, signalLabel } from './candidateBuilder.js';
 import { decideCandidateBatch } from './llm.js';
 import { activeStrategy } from '../db/settings.js';
-import { createDryRunPosition, createLivePosition, canOpenMorePositions, openPositionCount, tradingMode } from '../db/positions.js';
+import { createDryRunPosition, canOpenMorePositions, openPositionCount, tradingMode, maxOpenPositionsLimit } from '../db/positions.js';
+import { liveWalletBalanceLamports } from '../liveExecutor.js';
+import { canAffordLiveEntry } from '../execution/sizing.js';
 import { sendBatchReveal, sendTelegram, sendPositionOpen, sendTradeIntent } from '../telegram/send.js';
 import { candidateSummary } from '../telegram/format.js';
 import { createTradeIntent } from '../db/intents.js';
@@ -29,11 +31,23 @@ export async function processCandidateFromSignals(signals) {
     return;
   }
 
-  // Skip if max positions reached — don't waste enrichment/LLM calls
-  if (!canOpenMorePositions()) {
-    const max = numSetting('max_open_positions', 3);
-    console.log(`[agent] max positions reached (${openPositionCount()}/${max}), skipping ${signals.mint.slice(0, 8)}...`);
+  const maxPos = maxOpenPositionsLimit();
+  if (maxPos > 0 && !canOpenMorePositions()) {
+    console.log(`[agent] max positions reached (${openPositionCount()}/${maxPos}), skipping ${signals.mint.slice(0, 8)}...`);
     return;
+  }
+  if (tradingMode() === 'live') {
+    try {
+      const strat = activeStrategy();
+      const balance = await liveWalletBalanceLamports();
+      if (!canAffordLiveEntry(balance, strat)) {
+        console.log(`[agent] insufficient SOL for live entry (~${strat.position_size_sol} SOL + gas), skipping ${signals.mint.slice(0, 8)}...`);
+        return;
+      }
+    } catch (err) {
+      console.log(`[agent] wallet balance check failed: ${err.message}`);
+      return;
+    }
   }
 
   const candidate = await buildCandidate(signals);
@@ -94,9 +108,10 @@ export async function processCandidateFromSignals(signals) {
   if (batchId) await sendBatchReveal(batchId, rows, batchDecision, candidateId);
 
   if (selectedRow && boolSetting('agent_enabled', true) && batchDecision.verdict === 'BUY' && batchDecision.confidence >= numSetting('llm_min_confidence', 75)) {
-    if (!canOpenMorePositions()) {
-      const max = numSetting('max_open_positions', 3);
-      console.log(`[agent] max open positions reached (${openPositionCount()}/${max}), skipping buy ${selectedRow.candidate.token.mint}`);
+    const mode = tradingMode();
+    const maxPos = maxOpenPositionsLimit();
+    if (maxPos > 0 && !canOpenMorePositions()) {
+      console.log(`[agent] max open positions reached (${openPositionCount()}/${maxPos}), skipping buy ${selectedRow.candidate.token.mint}`);
       logDecisionEvent({
         batchId,
         triggerCandidateId: candidateId,
@@ -104,9 +119,31 @@ export async function processCandidateFromSignals(signals) {
         rows,
         decision: batchDecision,
         action: 'entry_skipped_max_positions',
-        guardrails: { maxOpenPositions: max, openPositions: openPositionCount() },
+        guardrails: { maxOpenPositions: maxPos, openPositions: openPositionCount() },
       });
       return;
+    }
+    if (mode === 'live') {
+      try {
+        const strat = activeStrategy();
+        const balance = await liveWalletBalanceLamports();
+        if (!canAffordLiveEntry(balance, strat)) {
+          console.log(`[agent] insufficient SOL for live buy ${selectedRow.candidate.token.mint.slice(0, 8)}...`);
+          logDecisionEvent({
+            batchId,
+            triggerCandidateId: candidateId,
+            selectedRow,
+            rows,
+            decision: batchDecision,
+            action: 'entry_skipped_insufficient_balance',
+            guardrails: { balanceLamports: balance, positionSizeSol: strat.position_size_sol },
+          });
+          return;
+        }
+      } catch (err) {
+        console.log(`[agent] live balance check failed: ${err.message}`);
+        return;
+      }
     }
     await handleApprovedBuy(selectedRow, batchDecision, batchId, rows, candidateId);
   } else {

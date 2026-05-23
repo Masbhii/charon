@@ -58,16 +58,16 @@ export async function buildTradingStatusText() {
   return [
     '📟 <b>Charon status</b>',
     '',
-    `Entries: <b>${agentOn ? 'RUNNING' : 'STOPPED'}</b> <i>(/start /stop)</i>`,
+    `Entries: <b>${agentOn ? 'RUNNING' : 'PAUSED'}</b> <i>(/start /stop /pause)</i>`,
     `Mode: <b>${escapeHtml(mode)}</b>`,
     `Strategy: <b>${escapeHtml(strat.name)}</b>`,
     `Position size (base): <b>${fmtSol(strat.position_size_sol)} SOL</b> <i>(/size)</i>`,
-    `Open positions: <b>${openPositionCount()}/${strat.max_open_positions}</b>`,
+    `Open positions: <b>${openPositionCount()}${(strat.max_open_positions ?? 0) > 0 ? `/${strat.max_open_positions}` : ' (unlimited)'}</b>`,
     mode === 'live' ? `Live wallet: <code>${escapeHtml(pubkey || 'not loaded')}</code>` : null,
     balanceLine,
     errors.length ? `\n⚠️ <b>Live not ready</b>\n${errors.map(e => `• ${escapeHtml(e)}`).join('\n')}` : null,
     mode === 'live' && !errors.length ? '\n✅ Live execution ready' : null,
     '',
-    '<i>Stop = no new auto entries. Open positions still monitored.</i>',
+    '<i>Pause/stop = no new entries. Live apes each pass while SOL lasts (gas reserve %).</i>',
   ].filter(Boolean).join('\n');
 }

@@ -51,9 +51,9 @@ export async function handleMessage(msg) {
     setAgentEnabled(true);
     return bot.sendMessage(chatId, '▶️ <b>Trading started</b> — new entries enabled.\n\n' + await buildTradingStatusText(), { parse_mode: 'HTML' });
   }
-  if (text.startsWith('/stop') || text.startsWith('/tradeoff')) {
+  if (text.startsWith('/stop') || text.startsWith('/tradeoff') || text.startsWith('/pause')) {
     setAgentEnabled(false);
-    return bot.sendMessage(chatId, '⏹ <b>Trading stopped</b> — no new auto entries. Open positions still monitored.\n\n' + await buildTradingStatusText(), { parse_mode: 'HTML' });
+    return bot.sendMessage(chatId, '⏸ <b>Trading paused</b> — no new auto entries. Open positions still monitored.\n\n' + await buildTradingStatusText(), { parse_mode: 'HTML' });
   }
   if (text.startsWith('/status')) {
     return bot.sendMessage(chatId, await buildTradingStatusText(), { parse_mode: 'HTML', ...menuKeyboard() });
@@ -105,7 +105,7 @@ export async function handleMessage(msg) {
     }
     const strat = strategyById(id);
     if (!strat) return bot.sendMessage(chatId, `Strategy "${id}" not found.`);
-    const numKeys = new Set(['tp_percent', 'sl_percent', 'position_size_sol', 'max_open_positions', 'min_mcap_usd', 'max_mcap_usd', 'min_holders', 'min_holders_grace_ms', 'max_top20_holder_percent', 'max_bundle_single_holder_percent', 'max_bundle_top4_combined_percent', 'duplicate_ticker_og_window_ms', 'trailing_percent', 'early_trail_arm_pct', 'partial_tp_at_percent', 'partial_tp_sell_percent', 'max_hold_ms', 'llm_min_confidence', 'min_source_count', 'min_fee_claim_sol', 'min_gmgn_total_fee_sol', 'max_ath_distance_pct', 'token_age_max_ms', 'trending_min_volume_usd', 'trending_min_swaps', 'trending_max_rug_ratio', 'trending_max_bundler_rate', 'min_saved_wallet_holders', 'min_graduated_volume_usd', 'min_graduated_age_ms', 'max_graduated_age_ms', 'min_liquidity_usd', 'min_holder_quality_score', 'min_volume_1h_usd', 'max_volume_1h_usd']);
+    const numKeys = new Set(['tp_percent', 'sl_percent', 'position_size_sol', 'max_open_positions', 'min_mcap_usd', 'max_mcap_usd', 'min_holders', 'min_holders_grace_ms', 'min_rugcheck_score', 'max_top20_holder_percent', 'max_bundle_single_holder_percent', 'max_bundle_top4_combined_percent', 'duplicate_ticker_og_window_ms', 'trailing_percent', 'early_trail_arm_pct', 'partial_tp_at_percent', 'partial_tp_sell_percent', 'max_hold_ms', 'llm_min_confidence', 'min_source_count', 'min_fee_claim_sol', 'min_gmgn_total_fee_sol', 'max_ath_distance_pct', 'token_age_max_ms', 'trending_min_volume_usd', 'trending_min_swaps', 'trending_max_rug_ratio', 'trending_max_bundler_rate', 'min_saved_wallet_holders', 'min_graduated_volume_usd', 'min_graduated_age_ms', 'max_graduated_age_ms', 'min_liquidity_usd', 'min_holder_quality_score', 'min_volume_1h_usd', 'max_volume_1h_usd']);
     const boolKeys = new Set(['trailing_enabled', 'partial_tp', 'moonbag_on_partial_tp', 'use_llm', 'require_fee_claim']);
     const newConfig = { ...strat };
     delete newConfig.id;
@@ -286,7 +286,8 @@ export function setupTelegram() {
     { command: 'menu', description: 'Open Charon menu' },
     { command: 'status', description: 'Bot status (mode, size, wallet)' },
     { command: 'start', description: 'Resume new trade entries' },
-    { command: 'stop', description: 'Pause new trade entries' },
+    { command: 'stop', description: 'Pause new trade entries (alias: /pause)' },
+    { command: 'pause', description: 'Pause new trade entries (same as /stop)' },
     { command: 'size', description: 'Set position size SOL (e.g. /size 0.1)' },
     { command: 'live', description: 'Switch to live mode (needs wallet key)' },
     { command: 'dryrun', description: 'Switch to dry-run mode' },

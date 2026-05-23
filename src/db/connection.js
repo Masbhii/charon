@@ -410,7 +410,7 @@ export function initDb() {
     min_holder_quality_score: 40,
     min_rugcheck_score: 40,
     position_size_sol: 0.1,
-    max_open_positions: 2,
+    max_open_positions: 0,
     tp_percent: 120,
     sl_percent: -70,
     trailing_enabled: true,

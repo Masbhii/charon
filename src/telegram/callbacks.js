@@ -48,7 +48,7 @@ export async function handleCallback(query) {
     return editMenuMessage(query, agentText(), agentKeyboard());
   }
   if (data === 'toggle:agent') {
-    setSetting('agent_enabled', boolSetting('agent_enabled', true) ? 'false' : 'true');
+    setAgentEnabled(!boolSetting('agent_enabled', true));
     return editMenuMessage(query, agentText(), agentKeyboard());
   }
   if (data === 'control:start') {

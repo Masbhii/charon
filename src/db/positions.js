@@ -10,9 +10,14 @@ export function openPositionCount() {
   return db.prepare('SELECT COUNT(*) AS count FROM dry_run_positions WHERE status = ?').get('open').count;
 }
 
-export function canOpenMorePositions() {
+export function maxOpenPositionsLimit() {
   const strat = activeStrategy();
-  const max = strat.max_open_positions ?? numSetting('max_open_positions', 3);
+  return strat.max_open_positions ?? numSetting('max_open_positions', 3);
+}
+
+/** max_open_positions <= 0 = unlimited (live limited by wallet + gas only). */
+export function canOpenMorePositions() {
+  const max = maxOpenPositionsLimit();
   if (max <= 0) return true;
   return openPositionCount() < max;
 }
@@ -80,9 +85,9 @@ export function createDryRunPosition(candidateId, candidate, decision, reason = 
   })();
 }
 
-export function createLivePosition(candidateId, candidate, decision, swap, reason = 'live_buy') {
+export function createLivePosition(candidateId, candidate, decision, swap, reason = 'live_buy', actualSizeSol = null) {
   const strat = activeStrategy();
-  const sizeSol = strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1);
+  const sizeSol = actualSizeSol ?? strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1);
   const entryPrice = Number(candidate.metrics.priceUsd || 0) || null;
   const entryMcap = Number(candidate.metrics.marketCapUsd || candidate.metrics.graduatedMarketCapUsd || 0) || null;
   const tp = Number(decision.suggested_tp_percent || strat.tp_percent || numSetting('default_tp_percent', 50));

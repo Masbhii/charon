@@ -158,7 +158,7 @@ export function agentKeyboard() {
       inline_keyboard: [
         [
           { text: '▶ Start', callback_data: 'control:start' },
-          { text: '⏹ Stop', callback_data: 'control:stop' },
+          { text: '⏸ Pause', callback_data: 'control:stop' },
         ],
         [
           { text: '0.05 SOL', callback_data: 'control:size:0.05' },
@@ -171,9 +171,9 @@ export function agentKeyboard() {
           { text: 'Live', callback_data: 'set:trading_mode:live' },
         ],
         [
-          { text: 'Max Pos 1', callback_data: 'set:max_open_positions:1' },
-          { text: 'Max Pos 3', callback_data: 'set:max_open_positions:3' },
-          { text: 'Max Pos 5', callback_data: 'set:max_open_positions:5' },
+          { text: 'Max ∞', callback_data: 'set:max_open_positions:0' },
+          { text: 'Max 3', callback_data: 'set:max_open_positions:3' },
+          { text: 'Max 5', callback_data: 'set:max_open_positions:5' },
         ],
         [
           { text: 'Batch 5', callback_data: 'set:llm_candidate_pick_count:5' },
@@ -211,7 +211,7 @@ export function mainMenuText() {
     `Strategy: ${escapeHtml(strat.name)} · Size: ${fmtSol(strat.position_size_sol)} SOL`,
     mode === 'live' && liveWalletPubkey() ? `Wallet: <code>${escapeHtml(liveWalletPubkey())}</code>` : null,
     '',
-    '/status · /start · /stop · /size · /menu',
+    '/status · /start · /stop · /pause · /size · /live · /menu',
   ].filter(Boolean).join('\n');
 }
 

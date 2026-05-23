@@ -6,6 +6,7 @@ import { escapeHtml, fmtSol } from '../format.js';
 import { executeJupiterSwap, liveWalletBalanceLamports, fetchLiveTokenBalance } from '../liveExecutor.js';
 import { activeStrategy } from '../db/settings.js';
 import { createLivePosition, canOpenMorePositions, openPositionCount } from '../db/positions.js';
+import { computeDynamicPositionSize, canAffordLiveEntry } from './sizing.js';
 import { intentById } from '../db/intents.js';
 import { logDecisionEvent } from '../db/decisions.js';
 import { refreshCandidateForExecution } from './positions.js';
@@ -15,35 +16,17 @@ import { sendPositionOpen, sendTelegram } from '../telegram/send.js';
 import { updateCandidateStatus } from '../db/candidates.js';
 import { createTradeIntent } from '../db/intents.js';
 
-export function computeDynamicPositionSize(balanceLamports, strat) {
-  const SOL = 1_000_000_000;
-  const GAS_RESERVE_LAMPORTS = Math.floor(0.05 * SOL);
-  const MIN_POSITION_LAMPORTS = Math.floor(0.05 * SOL);
-  const configSizeSol = strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1);
-  const MAX_POSITION_LAMPORTS = Math.floor(configSizeSol * 3 * SOL);
-
-  const availableLamports = balanceLamports - GAS_RESERVE_LAMPORTS;
-  if (availableLamports <= MIN_POSITION_LAMPORTS) {
-    return Math.floor(configSizeSol * SOL);
-  }
-
-  const openCount = openPositionCount();
-  const tierFractions = [0.20, 0.15, 0.10, 0.07];
-  const fraction = tierFractions[Math.min(openCount, tierFractions.length - 1)];
-  const dynamicLamports = Math.floor(availableLamports * fraction);
-  const finalLamports = Math.max(MIN_POSITION_LAMPORTS, Math.min(MAX_POSITION_LAMPORTS, dynamicLamports));
-  console.log(`[sizing] open=${openCount} balance=${(balanceLamports / SOL).toFixed(3)} SOL tier=${(fraction * 100).toFixed(0)}% size=${(finalLamports / SOL).toFixed(4)} SOL`);
-  return finalLamports;
-}
+export { computeDynamicPositionSize, canAffordLiveEntry } from './sizing.js';
 
 export async function executeLiveBuy(selectedRow, decision, batchId, rows = [], triggerCandidateId = null) {
   const strat = activeStrategy();
   const balance = await liveWalletBalanceLamports();
+  if (!canAffordLiveEntry(balance, strat)) {
+    throw new Error(`Insufficient SOL for live entry (need ~${fmtSol(strat.position_size_sol)} SOL + gas reserve). Balance: ${fmtSol(balance / 1_000_000_000)} SOL.`);
+  }
   const amountLamports = computeDynamicPositionSize(balance, strat);
   const dynamicSizeSol = amountLamports / 1_000_000_000;
-  if (balance < amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) {
-    throw new Error(`Insufficient SOL balance. Have ${fmtSol(balance / 1_000_000_000)} SOL, need ${fmtSol((amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) / 1_000_000_000)} SOL.`);
-  }
+  console.log(`[sizing] balance=${fmtSol(balance / 1_000_000_000)} target=${fmtSol(strat.position_size_sol)} actual=${fmtSol(dynamicSizeSol)} open=${openPositionCount()}`);
   const swap = await executeJupiterSwap({
     inputMint: WSOL_MINT,
     outputMint: selectedRow.candidate.token.mint,
@@ -52,9 +35,9 @@ export async function executeLiveBuy(selectedRow, decision, batchId, rows = [], 
   if (!swap.outputAmount) {
     swap.outputAmount = await fetchLiveTokenBalance(selectedRow.candidate.token.mint) || swap.outputAmount;
   }
-  const positionId = createLivePosition(selectedRow.id, selectedRow.candidate, decision, swap, `live_batch_${batchId}`);
+  const positionId = createLivePosition(selectedRow.id, selectedRow.candidate, decision, swap, `live_batch_${batchId}`, dynamicSizeSol);
   if (positionId && dynamicSizeSol) {
-    db.prepare('UPDATE dry_run_positions SET dynamic_size_sol = ? WHERE id = ?').run(dynamicSizeSol, positionId);
+    db.prepare('UPDATE dry_run_positions SET size_sol = ?, dynamic_size_sol = ? WHERE id = ?').run(dynamicSizeSol, dynamicSizeSol, positionId);
   }
   logDecisionEvent({
     batchId,
@@ -104,12 +87,12 @@ export async function executeConfirmedIntent(chatId, intentId) {
     }
     const strat = activeStrategy();
     const balance = await liveWalletBalanceLamports();
+    if (!canAffordLiveEntry(balance, strat)) {
+      db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('rejected_insufficient_balance', now(), intentId);
+      return bot.sendMessage(chatId, `Insufficient SOL for live entry (~${fmtSol(strat.position_size_sol)} SOL + gas). Balance: ${fmtSol(balance / 1_000_000_000)} SOL.`, { parse_mode: 'HTML' });
+    }
     const amountLamports = computeDynamicPositionSize(balance, strat);
     const dynamicSizeSol = amountLamports / 1_000_000_000;
-    if (balance < amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) {
-      db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('rejected_insufficient_balance', now(), intentId);
-      return bot.sendMessage(chatId, `Insufficient SOL balance. Need ${fmtSol((amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) / 1_000_000_000)} SOL.`, { parse_mode: 'HTML' });
-    }
     const swap = await executeJupiterSwap({
       inputMint: WSOL_MINT,
       outputMint: freshRow.candidate.token.mint,
@@ -118,9 +101,9 @@ export async function executeConfirmedIntent(chatId, intentId) {
     if (!swap.outputAmount) {
       swap.outputAmount = await fetchLiveTokenBalance(freshRow.candidate.token.mint) || swap.outputAmount;
     }
-    const positionId = createLivePosition(intent.candidate_id, freshRow.candidate, decision, swap, `confirmed_intent_${intentId}`);
+    const positionId = createLivePosition(intent.candidate_id, freshRow.candidate, decision, swap, `confirmed_intent_${intentId}`, dynamicSizeSol);
     if (positionId && dynamicSizeSol) {
-      db.prepare('UPDATE dry_run_positions SET dynamic_size_sol = ? WHERE id = ?').run(dynamicSizeSol, positionId);
+      db.prepare('UPDATE dry_run_positions SET size_sol = ?, dynamic_size_sol = ? WHERE id = ?').run(dynamicSizeSol, dynamicSizeSol, positionId);
     }
     db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('executed_live', now(), intentId);
     logDecisionEvent({
