@@ -31,13 +31,15 @@ export function signalLabel(signals = {}) {
 }
 
 /**
- * If another mint shares this Pump ticker and graduated strictly earlier within windowMs, return failure reason (copy/vamp heuristic).
+ * Reject copy/vamp: same Pump ticker with an earlier graduate within windowMs (default 10m).
+ * Graduates more than windowMs apart are allowed (independent tickers reuse).
  */
 export function duplicateTickerOgFailure(mint, graduationRow, windowMs, graduatedMap, fallbackTicker = '') {
   if (!windowMs || !mint || !graduationRow) return null;
   const myTicker = String(graduationRow.ticker ?? fallbackTicker ?? '').trim().toUpperCase();
   const myG = Number(graduationRow.graduationDate || 0);
   if (!myTicker || !myG) return null;
+  const windowMin = Math.round(windowMs / 60_000);
   for (const coin of graduatedMap.values()) {
     const otherMint = coin.coinMint;
     if (!otherMint || otherMint === mint) continue;
@@ -47,7 +49,7 @@ export function duplicateTickerOgFailure(mint, graduationRow, windowMs, graduate
     if (!(otherG > 0 && otherG < myG)) continue;
     const deltaMs = myG - otherG;
     if (deltaMs > 0 && deltaMs <= windowMs) {
-      return `duplicate ticker: ${myTicker} has earlier graduate (${Math.round(deltaMs / 1000)}s before, same window)`;
+      return `duplicate ticker: ${myTicker} has earlier graduate (${Math.round(deltaMs / 1000)}s before, within ${windowMin}m)`;
     }
   }
   return null;

@@ -394,7 +394,7 @@ export function initDb() {
     max_top20_holder_percent: 35,
     max_bundle_single_holder_percent: 24,
     max_bundle_top4_combined_percent: 70,
-    duplicate_ticker_og_window_ms: 7_200_000,
+    duplicate_ticker_og_window_ms: 600_000,
     min_saved_wallet_holders: 0,
     max_ath_distance_pct: 0,
     min_graduated_volume_usd: 0,
@@ -475,6 +475,7 @@ function patchGraduateImmediateStrategyConfig() {
   const missingOnly = {
     min_rugcheck_score: 40,
     min_holders_grace_ms: 180_000,
+    duplicate_ticker_og_window_ms: 600_000,
   };
   let changed = false;
   for (const [key, value] of Object.entries(missingOnly)) {
@@ -482,6 +483,10 @@ function patchGraduateImmediateStrategyConfig() {
       config[key] = value;
       changed = true;
     }
+  }
+  if (config.duplicate_ticker_og_window_ms >= 7_200_000) {
+    config.duplicate_ticker_og_window_ms = 600_000;
+    changed = true;
   }
   if (changed) {
     db.prepare("UPDATE strategies SET config_json = ? WHERE id = 'graduate_immediate'").run(JSON.stringify(config));
