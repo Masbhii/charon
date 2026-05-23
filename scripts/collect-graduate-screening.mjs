@@ -142,6 +142,7 @@ function pickStrategy(strat) {
     max_bundle_top4_combined_percent: strat.max_bundle_top4_combined_percent,
     duplicate_ticker_og_window_ms: strat.duplicate_ticker_og_window_ms,
     min_holder_quality_score: strat.min_holder_quality_score,
+    min_rugcheck_score: strat.min_rugcheck_score,
     partial_tp: strat.partial_tp,
     partial_tp_at_percent: strat.partial_tp_at_percent,
     partial_tp_sell_percent: strat.partial_tp_sell_percent,
@@ -172,6 +173,7 @@ function candidateMetrics(candidate) {
   return {
     token: candidate.token,
     holder_quality: hqs ? { score: hqs.score, flags: hqs.flags } : null,
+    rugcheck: candidate.rugcheck ?? null,
     metrics: {
       price_usd: candidate.metrics?.priceUsd ?? null,
       market_cap_usd: candidate.metrics?.marketCapUsd ?? null,
@@ -340,7 +342,7 @@ await sendTelegramMessage([
   `Duration: <b>${durationMs > 0 ? `${(durationMs / 3_600_000).toFixed(1)}h` : 'off'}</b>`,
   `Confirm pass: <b>${confirmPass ? 'yes' : 'no'}</b>`,
   '',
-  `Filters: age ${strat.min_graduated_age_ms / 1000}s-${strat.max_graduated_age_ms / 1000}s, mcap ${fmtUsd(strat.min_mcap_usd)}-${fmtUsd(strat.max_mcap_usd)}, HQS≥${strat.min_holder_quality_score || 0}, partial TP ${strat.partial_tp_sell_percent}%`,
+  `Filters: age ${strat.min_graduated_age_ms / 1000}s-${strat.max_graduated_age_ms / 1000}s, mcap ${fmtUsd(strat.min_mcap_usd)}-${fmtUsd(strat.max_mcap_usd)}, HQS≥${strat.min_holder_quality_score || 0}, RugCheck≥${strat.min_rugcheck_score || 0}, partial TP ${strat.partial_tp_sell_percent}%`,
   '<i>Data-only mode. No trade execution.</i>',
 ].join('\n'));
 
@@ -367,6 +369,7 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
       hqs: candidate.holders && strat.min_holder_quality_score > 0
         ? computeHolderQualityScore(candidate)
         : null,
+      rugcheck: candidate.rugcheck ?? null,
     };
     safeAppendJsonl(fullChecksFile, {
       type: 'full_check',
@@ -435,8 +438,9 @@ async function scanOnce() {
         mcapPump: fmtUsd(q.marketCapUsd),
         reasons,
       };
-      if (fullFilter?.hqs) {
-        row.hqs = `${fullFilter.hqs.score}/100`;
+      if (fullFilter?.hqs) row.hqs = `${fullFilter.hqs.score}/100`;
+      if (fullFilter?.rugcheck?.displayScore != null) {
+        row.rugcheck = `${fullFilter.rugcheck.displayScore}/100`;
       }
       analyzed.push(row);
     }
@@ -519,8 +523,9 @@ async function scanOnce() {
     for (const r of analyzed) {
       const status = r.pass ? '✓ PASS' : '✗ FAIL';
       const hqsStr = r.hqs ? ` hqs=${r.hqs}` : '';
+      const rcStr = r.rugcheck ? ` rc=${r.rugcheck}` : '';
       const reason = r.reasons.length ? ` | ${r.reasons.join('; ')}` : '';
-      console.log(`  ${status} | ${String(r.symbol).padEnd(12)} | age=${r.age.padEnd(8)} mcap=${r.mcapPump.padEnd(8)}${hqsStr}${reason}`);
+      console.log(`  ${status} | ${String(r.symbol).padEnd(12)} | age=${r.age.padEnd(8)} mcap=${r.mcapPump.padEnd(8)}${hqsStr}${rcStr}${reason}`);
       console.log(`           CA: ${r.mint}`);
     }
     if (!quickPassCount && tick === 1) {

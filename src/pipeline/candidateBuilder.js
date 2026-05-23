@@ -2,6 +2,8 @@ import { now, firstPositiveNumber, marketCapFromGmgn, tokenPriceFromGmgn, lamToS
 import { activeStrategy } from '../db/settings.js';
 import { fetchGmgnTokenInfo } from '../enrichment/gmgn.js';
 import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, volume1hUsdFromJupiterAsset } from '../enrichment/jupiter.js';
+import { fetchRugcheckSummary, rugcheckFilterFailure } from '../enrichment/rugcheck.js';
+import { RUGCHECK_ENABLED } from '../config.js';
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { fetchTwitterNarrative } from '../enrichment/twitter.js';
 import { gmgnLink } from '../format.js';
@@ -239,6 +241,9 @@ export function filterCandidate(candidate) {
     }
   }
 
+  const rugFail = rugcheckFilterFailure(candidate, strat.min_rugcheck_score);
+  if (rugFail) failures.push(rugFail);
+
   // Top holder concentration (legacy single-wallet cap)
   if (strat.max_top20_holder_percent < 100 && Number.isFinite(maxHolder) && maxHolder > strat.max_top20_holder_percent) {
     failures.push(`max top holder: ${maxHolder}% > ${strat.max_top20_holder_percent}%`);
@@ -296,28 +301,33 @@ function isFastMigrateEnrichment(route, strat) {
 export async function buildCandidate({ mint, fee = null, signature = null, graduatedCoin = null, trendingToken = null, route }) {
   const strat = activeStrategy();
   const fastMigrate = isFastMigrateEnrichment(route, strat);
+  const needRugcheck = RUGCHECK_ENABLED && Number(strat.min_rugcheck_score ?? 0) > 0;
+  const rugcheckPromise = needRugcheck ? fetchRugcheckSummary(mint) : Promise.resolve(null);
   let gmgn;
   let jupiterAsset;
   let holders;
   let chart;
   let savedWalletExposure;
   let twitterNarrative;
+  let rugcheck;
 
   if (fastMigrate) {
-    [gmgn, jupiterAsset, holders] = await Promise.all([
+    [gmgn, jupiterAsset, holders, rugcheck] = await Promise.all([
       fetchGmgnTokenInfo(mint),
       fetchJupiterAsset(mint),
       fetchJupiterHolders(mint),
+      rugcheckPromise,
     ]);
     chart = null;
     savedWalletExposure = { holderCount: 0, checked: 0, wallets: [] };
     twitterNarrative = null;
   } else {
-    [gmgn, jupiterAsset, holders, chart] = await Promise.all([
+    [gmgn, jupiterAsset, holders, chart, rugcheck] = await Promise.all([
       fetchGmgnTokenInfo(mint),
       fetchJupiterAsset(mint),
       fetchJupiterHolders(mint),
       fetchJupiterChartContext(mint),
+      rugcheckPromise,
     ]);
     savedWalletExposure = await fetchSavedWalletExposure(mint, holders);
     twitterNarrative = await fetchTwitterNarrative(graduatedCoin || jupiterAsset, gmgn);
@@ -385,6 +395,7 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
     chart,
     savedWalletExposure,
     twitterNarrative,
+    rugcheck,
     createdAtMs: now(),
   };
   candidate.builtAtMs = now();

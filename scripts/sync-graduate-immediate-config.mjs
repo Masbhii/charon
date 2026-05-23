@@ -50,6 +50,7 @@ const next = {
   max_bundle_top4_combined_percent: argNumber('--max-bundle-top4', 95),
   duplicate_ticker_og_window_ms: argNumber('--duplicate-window-ms', 7_200_000),
   min_holder_quality_score: argNumber('--min-hqs', 40),
+  min_rugcheck_score: argNumber('--min-rugcheck', 55),
   partial_tp_sell_percent: argNumber('--partial-tp-sell', 80),
 };
 
@@ -79,6 +80,7 @@ const out = {
     max_bundle_top4_combined_percent: synced.max_bundle_top4_combined_percent,
     duplicate_ticker_og_window_ms: synced.duplicate_ticker_og_window_ms,
     min_holder_quality_score: synced.min_holder_quality_score,
+    min_rugcheck_score: synced.min_rugcheck_score,
     partial_tp_sell_percent: synced.partial_tp_sell_percent,
   },
 };

@@ -78,7 +78,7 @@ console.log('=== TEST SCREENING graduate_immediate ===\n');
 console.log('Filter utama:');
 console.log(`  umur graduate: ${strat.min_graduated_age_ms / 1000}s – ${strat.max_graduated_age_ms / 1000}s`);
 console.log(`  mcap: ${fmtUsd(strat.min_mcap_usd)} – ${fmtUsd(strat.max_mcap_usd)}`);
-console.log(`  HQS min: ${strat.min_holder_quality_score ?? 0} | partial TP sell: ${strat.partial_tp_sell_percent}% @ +${strat.partial_tp_at_percent}%`);
+console.log(`  HQS min: ${strat.min_holder_quality_score ?? 0} | RugCheck min: ${strat.min_rugcheck_score ?? 0} | partial TP sell: ${strat.partial_tp_sell_percent}% @ +${strat.partial_tp_at_percent}%`);
 console.log(`  GMGN_ENABLED=${process.env.GMGN_ENABLED} TWITTER_ENABLED=${process.env.TWITTER_ENABLED}`);
 console.log(`  mode: ${quickOnly ? 'quick-only (Pump API)' : `quick + full buildCandidate (max ${fullLimit})`}\n`);
 
@@ -176,6 +176,8 @@ for (const { coin } of toEnrich) {
       lulus: f.passed,
       hqs: hqs ? `${hqs.score}/100` : undefined,
       hqsFlags: hqs?.flags?.length ? hqs.flags : undefined,
+      rugcheck: candidate.rugcheck?.displayScore != null ? `${candidate.rugcheck.displayScore}/100` : undefined,
+      rugcheckCreatorRugged: candidate.rugcheck?.creatorHistoryRug || undefined,
       mcapJupiter: fmtUsd(candidate.metrics?.marketCapUsd),
       umurGrad: fmtAge(now() - Number(coin.graduationDate || 0)),
       builtMs: ms,

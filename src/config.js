@@ -45,6 +45,14 @@ export const SIGNAL_SERVER_URL = process.env.SIGNAL_SERVER_URL || 'http://localh
 export const SIGNAL_SERVER_KEY = process.env.SIGNAL_SERVER_KEY || '';
 export const SIGNAL_POLL_MS = Number(process.env.SIGNAL_POLL_MS || 30_000);
 
+/** RugCheck via api.rugcheck.xyz (FluxRPC API key: https://fluxrpc.com/docs/rugcheck) */
+export const RUGCHECK_ENABLED = process.env.RUGCHECK_ENABLED !== 'false';
+export const RUGCHECK_API_KEY = process.env.RUGCHECK_API_KEY || '';
+export const RUGCHECK_BASE_URL = process.env.RUGCHECK_BASE_URL || 'https://api.rugcheck.xyz';
+export const RUGCHECK_TIMEOUT_MS = Number(process.env.RUGCHECK_TIMEOUT_MS || 4_000);
+export const RUGCHECK_CACHE_TTL_MS = Number(process.env.RUGCHECK_CACHE_TTL_MS || 120_000);
+export const RUGCHECK_FAIL_OPEN = process.env.RUGCHECK_FAIL_OPEN !== 'false';
+
 export const JSON_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',

@@ -84,6 +84,7 @@ export const strategyNumericLabels = {
   min_graduated_age_ms: 'minimum age after graduation (ms)',
   max_graduated_age_ms: 'maximum age after graduation (ms)',
   min_holder_quality_score: 'minimum holder quality score 0–100 (0=off; degen=40)',
+  min_rugcheck_score: 'minimum RugCheck score 0–100 (0=off; 55 blocks low scores, creator rugged OK if high)',
   min_volume_1h_usd: 'minimum 1h volume USD (Jupiter stats1h)',
   max_volume_1h_usd: 'maximum 1h volume USD (Jupiter stats1h)',
   min_holders: 'minimum holders',

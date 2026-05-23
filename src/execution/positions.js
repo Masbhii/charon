@@ -7,6 +7,8 @@ import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, fetch
 import { liveWalletPubkey } from '../liveExecutor.js';
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { filterCandidate } from '../pipeline/candidateBuilder.js';
+import { fetchRugcheckSummary } from '../enrichment/rugcheck.js';
+import { RUGCHECK_ENABLED } from '../config.js';
 import { openPositions } from '../db/positions.js';
 import { updateCandidateSnapshot } from '../db/candidates.js';
 import { trending } from '../signals/trending.js';
@@ -32,11 +34,13 @@ export async function refreshCandidateForExecution(row) {
   const mint = candidate.token.mint;
   const strat = strategyById(activeStrategy()?.id);
   const fastMigrate = strat?.id === 'graduate_immediate';
-  const [gmgn, asset, holders, chart] = await Promise.all([
+  const needRugcheck = RUGCHECK_ENABLED && Number(strat?.min_rugcheck_score ?? 0) > 0;
+  const [gmgn, asset, holders, chart, rugcheck] = await Promise.all([
     fetchGmgnTokenInfo(mint, false),
     fetchJupiterAsset(mint, { useCache: false }),
     fetchJupiterHolders(mint),
     fastMigrate ? Promise.resolve(null) : fetchJupiterChartContext(mint),
+    needRugcheck ? fetchRugcheckSummary(mint, { useCache: false }) : Promise.resolve(candidate.rugcheck ?? null),
   ]);
   const selectedTrending = trending.get(mint) || candidate.trending || null;
   const selectedHolders = holders?.holders?.length ? holders : candidate.holders;
@@ -84,6 +88,7 @@ export async function refreshCandidateForExecution(row) {
     holders: selectedHolders,
     chart,
     savedWalletExposure: selectedSavedWalletExposure,
+    rugcheck,
     executionRefresh: {
       refreshedAtMs: now(),
       source: 'pre_execution',
