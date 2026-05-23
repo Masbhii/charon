@@ -1,5 +1,5 @@
 import { now, firstPositiveNumber, marketCapFromGmgn, tokenPriceFromGmgn, lamToSol } from '../utils.js';
-import { activeStrategy } from '../db/settings.js';
+import { activeStrategy, strategyForSignals } from '../db/settings.js';
 import { fetchGmgnTokenInfo } from '../enrichment/gmgn.js';
 import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, volume1hUsdFromJupiterAsset } from '../enrichment/jupiter.js';
 import { fetchRugcheckSummary, rugcheckFilterFailure } from '../enrichment/rugcheck.js';
@@ -129,8 +129,8 @@ export function computeHolderQualityScore(candidate) {
   return { score, flags };
 }
 
-export function filterCandidate(candidate) {
-  const strat = activeStrategy();
+export function filterCandidate(candidate, stratOverride = null) {
+  const strat = stratOverride || candidate._strategy || activeStrategy();
   const failures = [];
   const mcap = candidate.metrics?.marketCapUsd;
   const totalFees = Number(candidate.metrics?.gmgnTotalFeesSol ?? 0);
@@ -301,7 +301,7 @@ function isFastMigrateEnrichment(route, strat) {
 }
 
 export async function buildCandidate({ mint, fee = null, signature = null, graduatedCoin = null, trendingToken = null, route }) {
-  const strat = activeStrategy();
+  const strat = strategyForSignals({ route, mint, graduatedCoin, trendingToken });
   const fastMigrate = isFastMigrateEnrichment(route, strat);
   const needRugcheck = RUGCHECK_ENABLED && Number(strat.min_rugcheck_score ?? 0) > 0;
   const rugcheckPromise = needRugcheck ? fetchRugcheckSummary(mint) : Promise.resolve(null);
@@ -401,6 +401,7 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
     createdAtMs: now(),
   };
   candidate.builtAtMs = now();
-  candidate.filters = filterCandidate(candidate);
+  candidate.filters = filterCandidate(candidate, strat);
+  candidate._strategy = strat;
   return candidate;
 }

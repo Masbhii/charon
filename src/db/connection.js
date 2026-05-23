@@ -215,6 +215,8 @@ export function initDb() {
 
   const defaults = {
     agent_enabled: 'true',
+    active_strategy_id: process.env.DEFAULT_ACTIVE_STRATEGY
+      || (process.env.GRADUATE_IMMEDIATE_ENABLED === 'true' ? 'graduate_immediate' : 'sniper'),
     trading_mode: process.env.TRADING_MODE || 'dry_run',
     llm_candidate_pick_count: process.env.LLM_CANDIDATE_PICK_COUNT || '10',
     llm_candidate_max_age_ms: process.env.LLM_CANDIDATE_MAX_AGE_MS || String(10 * 60 * 1000),
@@ -252,7 +254,7 @@ export function initDb() {
   const stratInsert = db.prepare('INSERT OR IGNORE INTO strategies (id, name, enabled, config_json, created_at_ms) VALUES (?, ?, ?, ?, ?)');
   const ts = Date.now();
 
-  stratInsert.run('sniper', 'Sniper', 1, JSON.stringify({
+  stratInsert.run('sniper', 'Sniper', 0, JSON.stringify({
     entry_mode: 'immediate',
     min_source_count: 2,
     require_fee_claim: true,
@@ -380,7 +382,7 @@ export function initDb() {
     llm_min_confidence: 0,
   }), ts);
 
-  stratInsert.run('graduate_immediate', 'Graduate Immediate', 0, JSON.stringify({
+  stratInsert.run('graduate_immediate', 'Graduate Immediate', 1, JSON.stringify({
     entry_mode: 'immediate',
     min_source_count: 1,
     require_fee_claim: false,
@@ -460,6 +462,23 @@ export function initDb() {
   }), Date.now());
 
   patchGraduateImmediateStrategyConfig();
+  patchDefaultActiveStrategy();
+}
+
+/** When GRADUATE_IMMEDIATE_ENABLED, make migrate-immediate the active strategy (existing DBs). */
+function patchDefaultActiveStrategy() {
+  if (process.env.GRADUATE_IMMEDIATE_ENABLED !== 'true'
+    && process.env.DEFAULT_ACTIVE_STRATEGY !== 'graduate_immediate') {
+    return;
+  }
+  const row = db.prepare("SELECT id FROM strategies WHERE id = 'graduate_immediate'").get();
+  if (!row) return;
+  db.prepare('UPDATE strategies SET enabled = 0').run();
+  db.prepare("UPDATE strategies SET enabled = 1 WHERE id = 'graduate_immediate'").run();
+  db.prepare(`
+    INSERT INTO settings (key, value) VALUES ('active_strategy_id', 'graduate_immediate')
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run();
 }
 
 /** Add missing keys only — does not overwrite existing filter/TP rules on VPS DB. */

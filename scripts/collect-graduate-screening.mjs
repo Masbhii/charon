@@ -58,7 +58,7 @@ process.env.GMGN_ENABLED = 'false';
 process.env.TWITTER_ENABLED = 'false';
 
 const { initDb } = await import('../src/db/connection.js');
-const { strategyById, setActiveStrategy, activeStrategy } = await import('../src/db/settings.js');
+const { strategyById } = await import('../src/db/settings.js');
 const { fetchGraduatedCoins, graduated } = await import('../src/signals/graduated.js');
 const { buildCandidate, duplicateTickerOgFailure, computeHolderQualityScore } = await import('../src/pipeline/candidateBuilder.js');
 const { now } = await import('../src/utils.js');
@@ -201,9 +201,6 @@ if (!strat) {
   console.error('graduate_immediate strategy not found. Run initDb/bot once first.');
   process.exit(1);
 }
-
-const prevId = activeStrategy()?.id ?? 'sniper';
-if (confirmPass) setActiveStrategy('graduate_immediate');
 
 fs.mkdirSync(logDir, { recursive: true });
 const sessionId = new Date().toISOString().replace(/[:.]/g, '-');
@@ -686,7 +683,6 @@ async function stop(code = 0, reason = 'stopped') {
   try {
     await sendFinalArtifacts(reason);
   } finally {
-    if (confirmPass) setActiveStrategy(prevId);
     console.log(`[collect] stopped. session=${sessionId}`);
     process.exit(code);
   }

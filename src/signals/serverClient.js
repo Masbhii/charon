@@ -45,6 +45,7 @@ export async function fetchServerSignals() {
     prune(seenSignals, 10 * 60_000);
 
     const strat = activeStrategy();
+    const graduateOnly = strat.id === 'graduate_immediate';
     let processed = 0;
     let triggered = 0;
     let dipAlerts = 0;
@@ -101,6 +102,26 @@ export async function fetchServerSignals() {
       const trendingToken = trending.get(mint) || null;
       const hasFee = Boolean(signal.feeClaim);
       const sourceCount = signal.sourceCount || 1;
+
+      if (graduateOnly) {
+        if (!graduatedCoin) { processed++; continue; }
+        const gDate = Number(graduatedCoin.graduationDate || signal.graduatedAt || 0);
+        const ageMs = gDate > 0 ? now() - gDate : null;
+        if (ageMs == null) { processed++; continue; }
+        if (ageMs < Number(strat.min_graduated_age_ms || 0)) { processed++; continue; }
+        if (strat.max_graduated_age_ms > 0 && ageMs > strat.max_graduated_age_ms) { processed++; continue; }
+        await triggerCandidate({
+          mint,
+          fee: null,
+          signature: null,
+          graduatedCoin,
+          trendingToken: null,
+          route: 'migrate_immediate',
+        });
+        triggered++;
+        processed++;
+        continue;
+      }
 
       // Strategy gate: check source count
       if (sourceCount < strat.min_source_count) { processed++; continue; }

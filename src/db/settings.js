@@ -25,6 +25,16 @@ const strategyCache = { id: null, config: null, at: 0 };
 
 export function activeStrategy() {
   if (strategyCache.config && Date.now() - strategyCache.at < 5000) return strategyCache.config;
+  const forcedId = setting('active_strategy_id', '');
+  if (forcedId) {
+    const forced = strategyById(forcedId);
+    if (forced) {
+      strategyCache.id = forced.id;
+      strategyCache.config = forced;
+      strategyCache.at = Date.now();
+      return forced;
+    }
+  }
   const row = db.prepare('SELECT * FROM strategies WHERE enabled = 1 LIMIT 1').get();
   if (!row) {
     const fallback = strategyById('sniper');
@@ -56,8 +66,31 @@ export function allStrategies() {
 export function setActiveStrategy(id) {
   db.prepare('UPDATE strategies SET enabled = 0').run();
   db.prepare('UPDATE strategies SET enabled = 1 WHERE id = ?').run(id);
+  setSetting('active_strategy_id', id);
   strategyCache.config = null;
   strategyCache.at = 0;
+}
+
+/** Migrate-immediate routes always use graduate_immediate config (not sniper/degen). */
+export function strategyForSignals(signals = {}) {
+  const route = signals.route || '';
+  if (route === 'migrate_immediate') {
+    const gi = strategyById('graduate_immediate');
+    if (gi) return gi;
+  }
+  const forced = setting('active_strategy_id', '');
+  if (forced && strategyById(forced)) return strategyById(forced);
+  return activeStrategy();
+}
+
+/** Call after initDb — sets graduate_immediate when GRADUATE_IMMEDIATE_ENABLED=true. */
+export function ensureDefaultActiveStrategy() {
+  const want = process.env.DEFAULT_ACTIVE_STRATEGY
+    || (process.env.GRADUATE_IMMEDIATE_ENABLED === 'true' ? 'graduate_immediate' : '');
+  if (!want || !strategyById(want)) return null;
+  setActiveStrategy(want);
+  console.log(`[db] default active strategy: ${want}`);
+  return want;
 }
 
 export function updateStrategyConfig(id, config) {

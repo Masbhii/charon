@@ -5,7 +5,7 @@ import { upsertCandidate, updateCandidateStatus, recentEligibleCandidates, candi
 import { storeDecision, storeBatchDecision, logDecisionEvent } from '../db/decisions.js';
 import { buildCandidate, filterCandidate, signalLabel } from './candidateBuilder.js';
 import { decideCandidateBatch } from './llm.js';
-import { activeStrategy } from '../db/settings.js';
+import { activeStrategy, strategyForSignals } from '../db/settings.js';
 import { createDryRunPosition, canOpenMorePositions, openPositionCount, tradingMode, maxOpenPositionsLimit } from '../db/positions.js';
 import { liveWalletBalanceLamports } from '../liveExecutor.js';
 import { canAffordLiveEntry } from '../execution/sizing.js';
@@ -58,7 +58,7 @@ export async function processCandidateFromSignals(signals) {
     return;
   }
 
-  const strat = activeStrategy();
+  const strat = strategyForSignals(signals);
   let rows, batchDecision, batchId;
 
   if (!strat.use_llm) {

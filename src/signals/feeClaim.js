@@ -8,7 +8,7 @@ import {
   SOLANA_WS_URL,
 } from '../config.js';
 import { now, pruneSeen, lamToSol, discMatch, parseDistFees, readPubkeyFromBuffer } from '../utils.js';
-import { numSetting, boolSetting, strategyById } from '../db/settings.js';
+import { numSetting, boolSetting, strategyById, activeStrategy } from '../db/settings.js';
 import { storeSignalEvent } from './trending.js';
 import { graduated } from './graduated.js';
 import { trending } from './trending.js';
@@ -77,6 +77,9 @@ export async function handleMigrateEvent(data, signature) {
 }
 
 export async function handleFeeClaim(fee, signature) {
+  if (GRADUATE_IMMEDIATE_ENABLED && activeStrategy()?.id === 'graduate_immediate') {
+    return;
+  }
   const sol = lamToSol(fee.distributed);
   if (sol < numSetting('min_fee_claim_sol', 2)) return;
   const graduatedCoin = graduated.get(fee.mint) || null;

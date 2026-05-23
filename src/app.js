@@ -1,6 +1,7 @@
 import { setDefaultResultOrder } from 'node:dns';
 import { APP_NAME, SIGNAL_SERVER_URL, SIGNAL_POLL_MS, GRADUATED_POLL_MS, TRENDING_POLL_MS, POSITION_CHECK_MS, GRADUATE_IMMEDIATE_ENABLED, validateConfig } from './config.js';
 import { initDb } from './db/connection.js';
+import { ensureDefaultActiveStrategy, activeStrategy } from './db/settings.js';
 import { initLiveExecution } from './liveExecutor.js';
 import { warnIfLiveMisconfigured } from './liveReadiness.js';
 import { tradingMode } from './db/positions.js';
@@ -15,6 +16,9 @@ validateConfig();
 
 export async function startCharon() {
   initDb();
+  ensureDefaultActiveStrategy();
+  const strat = activeStrategy();
+  console.log(`[bot] active strategy: ${strat.id} (${strat.name})`);
   initLiveExecution();
   warnIfLiveMisconfigured(tradingMode());
   setupTelegram();
