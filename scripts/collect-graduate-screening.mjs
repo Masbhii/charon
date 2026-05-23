@@ -9,7 +9,7 @@
  *   node scripts/collect-graduate-screening.mjs --interval 5000
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --confirm-pass
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --confirm-pass --telegram
- * Telegram: alert on first quick PASS per mint; optional follow-up when full Jupiter passes.
+ * Telegram: "Graduate Immediate PASS" saat lulus rules penuh (sama bot). Bukan dry-run buy.
  *   node scripts/collect-graduate-screening.mjs --interval 5000 --telegram --verbose
  *   node scripts/collect-graduate-screening.mjs --once --confirm-pass
  *
@@ -312,35 +312,23 @@ async function sendTelegramDocument(file, caption = '') {
   }
 }
 
-function passAlertText(observation, fullFilter = null) {
-  const lines = [
+/** Telegram format — sama seperti screenshot (screening-only, bukan dry-run buy). */
+function passAlertText(observation) {
+  return [
     '<b>Graduate Immediate PASS</b>',
     '',
     `Symbol: <b>${escapeHtml(observation.symbol || '?')}</b>`,
     `CA: <code>${escapeHtml(observation.mint)}</code>`,
     `Age: <b>${escapeHtml(fmtAge(observation.age_ms))}</b> since graduate`,
     `Mcap: <b>${escapeHtml(fmtUsd(observation.market_cap_usd_pump))}</b> Pump`,
-  ];
-  if (fullFilter?.passed) {
-    if (fullFilter.hqs?.score != null) lines.push(`HQS: <b>${fullFilter.hqs.score}/100</b>`);
-    if (fullFilter.rugcheck?.displayScore != null) {
-      lines.push(`RugCheck: <b>${fullFilter.rugcheck.displayScore}/100</b>`);
-    }
-    lines.push('', '<i>Quick + Jupiter full check passed.</i>');
-  } else if (confirmPass && fullFilter && !fullFilter.passed) {
-    const fail = (fullFilter.failures || []).slice(0, 4).join('; ') || 'full check failed';
-    lines.push('', `<i>Quick PASS — full check FAIL: ${escapeHtml(fail)}</i>`);
-  } else {
-    lines.push('', '<i>Quick PASS (Pump API). Full Jupiter check pending or skipped.</i>');
-  }
-  lines.push(`Session: <code>${escapeHtml(sessionId.slice(0, 19))}</code>`);
-  lines.push('', '<i>Screening-only collector. No buy/sell executed.</i>');
-  return lines.join('\n');
+    `Session: <code>${escapeHtml(sessionId.slice(0, 19))}</code>`,
+    '',
+    '<i>Screening-only collector. No buy/sell executed.</i>',
+  ].join('\n');
 }
 
 const seenMints = new Set();
-const firstPassAlertMints = new Set();
-const firstFullPassAlertMints = new Set();
+const firstTelegramPassMints = new Set();
 const lastQuickPass = new Map();
 const lastFullCheckAt = new Map();
 const lastFullCheckResult = new Map();
@@ -360,7 +348,8 @@ if (verbose) {
   console.log('║  SCREENING graduate_immediate — logs + optional Telegram    ║');
   console.log('╚══════════════════════════════════════════════════════════════╝');
   console.log(`Poll setiap ${intervalMs / 1000}s | umur ${strat.min_graduated_age_ms / 1000}s–${strat.max_graduated_age_ms / 1000}s | mcap ${fmtUsd(strat.min_mcap_usd)}–${fmtUsd(strat.max_mcap_usd)}`);
-  console.log(`Telegram PASS alerts: ${telegram.enabled ? 'YA' : 'tidak (--telegram)'}`);
+  console.log(`Telegram (rules PASS, format screenshot): ${telegram.enabled ? 'YA' : 'tidak (--telegram)'}`);
+  console.log('Log: ✓ PASS = lulus semua rules | ◐ QUICK = hanya Pump API | ✗ FAIL');
   console.log('Ctrl+C untuk berhenti\n');
 }
 console.log('[collect] Ctrl+C to stop');
@@ -373,8 +362,8 @@ await sendTelegramMessage([
   `Duration: <b>${durationMs > 0 ? `${(durationMs / 3_600_000).toFixed(1)}h` : 'off'}</b>`,
   `Confirm pass: <b>${confirmPass ? 'yes' : 'no'}</b>`,
   '',
-  `Filters: age ${strat.min_graduated_age_ms / 1000}s-${strat.max_graduated_age_ms / 1000}s, mcap ${fmtUsd(strat.min_mcap_usd)}-${fmtUsd(strat.max_mcap_usd)}, HQS≥${strat.min_holder_quality_score || 0}, RugCheck≥${strat.min_rugcheck_score || 0}, partial TP ${strat.partial_tp_sell_percent}%`,
-  '<i>Data-only mode. No trade execution.</i>',
+  `Filters: age ${strat.min_graduated_age_ms / 1000}s-${strat.max_graduated_age_ms / 1000}s, mcap ${fmtUsd(strat.min_mcap_usd)}-${fmtUsd(strat.max_mcap_usd)}, HQS≥${strat.min_holder_quality_score || 0}, RugCheck≥${strat.min_rugcheck_score || 0}`,
+  '<i>Screening-only — bukan dry-run buy. Pesan PASS = token lulus rules graduate_immediate.</i>',
 ].join('\n'));
 
 async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
@@ -437,15 +426,21 @@ async function maybeFullCheck({ mint, coin, observedAtMs, observedAtIso }) {
   }
 }
 
-async function sendPassTelegram(observation, fullFilter, kind) {
+async function sendPassTelegram(observation) {
   if (!telegram.enabled) return false;
-  const text = passAlertText(observation, fullFilter);
-  const sent = await sendTelegramMessage(text);
+  const sent = await sendTelegramMessage(passAlertText(observation));
   if (sent) {
-    console.log(`[telegram] ${kind} alert sent: ${observation.symbol || '?'} ${observation.mint.slice(0, 8)}...`);
+    console.log(`[telegram] Graduate Immediate PASS sent: ${observation.symbol || '?'} ${observation.mint.slice(0, 8)}...`);
     return true;
   }
   return false;
+}
+
+/** Rules pass = quick Pump prefilter + full filterCandidate (sama dengan bot graduate_immediate). */
+function rulesPass(q, fullFilter) {
+  if (!q.passed) return false;
+  if (!confirmPass) return true;
+  return fullFilter?.passed === true;
 }
 
 async function scanOnce() {
@@ -461,6 +456,7 @@ async function scanOnce() {
     .sort((a, b) => Number(b.graduationDate || 0) - Number(a.graduationDate || 0));
 
   let quickPassCount = 0;
+  let rulesPassCount = 0;
   let newPassCount = 0;
   const analyzed = [];
 
@@ -470,27 +466,28 @@ async function scanOnce() {
     if (q.passed) quickPassCount += 1;
 
     let fullFilter = null;
-    if (q.passed && confirmPass) {
+    const needsFull = q.passed && confirmPass;
+    const isFirstRulesCandidate = needsFull && !firstTelegramPassMints.has(mint) && !lastFullCheckResult.has(mint);
+    if (needsFull) {
+      if (isFirstRulesCandidate) lastFullCheckAt.delete(mint);
       fullFilter = await maybeFullCheck({ mint, coin, observedAtMs, observedAtIso });
     }
+
+    const passedRules = rulesPass(q, fullFilter);
+    if (passedRules) rulesPassCount += 1;
 
     if (verbose) {
       const reasons = [...q.failures];
       if (q.passed && fullFilter && !fullFilter.passed) {
         reasons.push(...(fullFilter.failures || []));
-      } else if (q.passed && confirmPass && fullFilter?.throttled) {
+      } else if (q.passed && confirmPass && fullFilter?.throttled && !fullFilter.passed) {
         reasons.push('full check cached (throttled)');
-      } else if (q.passed && confirmPass && !fullFilter) {
-        reasons.push('full check pending');
       }
-      const fullOk = fullFilter?.passed === true;
-      const displayPass = q.passed && (!confirmPass || fullOk);
-      const quickOnlyPass = q.passed && confirmPass && !fullOk;
       const row = {
         symbol: coin.ticker || coin.symbol || '?',
         mint,
-        pass: displayPass,
-        quickOnlyPass,
+        pass: passedRules,
+        quickOnlyPass: q.passed && !passedRules,
         age: fmtAge(q.ageMs),
         mcapPump: fmtUsd(q.marketCapUsd),
         reasons,
@@ -536,45 +533,28 @@ async function scanOnce() {
       });
     }
 
-    if (q.passed && !firstPassAlertMints.has(mint)) {
-      firstPassAlertMints.add(mint);
+    if (passedRules && !firstTelegramPassMints.has(mint)) {
+      firstTelegramPassMints.add(mint);
       newPassCount += 1;
       safeAppendJsonl(eventsFile, {
         ...observation,
-        type: 'quick_pass_first',
+        type: 'rules_pass_first',
         entry_proxy_market_cap_usd: q.marketCapUsd,
         entry_proxy_age_ms: q.ageMs,
-        full_passed: fullFilter?.passed ?? null,
+        full_failures: fullFilter?.failures ?? null,
       });
-      await sendPassTelegram(observation, fullFilter, 'quick PASS');
+      await sendPassTelegram(observation);
       if (verbose) {
-        console.log('\n🟢 ═══ QUICK PASS (BARU) → Telegram terkirim ═══');
+        console.log('\n🟢 ═══ ✓ PASS (rules) → Telegram terkirim ═══');
         console.log(`   Symbol : ${observation.symbol || '?'}`);
         console.log(`   CA     : ${mint}`);
         console.log(`   Umur   : ${fmtAge(observation.age_ms)} sejak graduate`);
         console.log(`   Mcap   : Pump ${fmtUsd(observation.market_cap_usd_pump)}`);
-        if (fullFilter?.passed) console.log('   Full   : Jupiter check PASS');
-        else if (fullFilter && !fullFilter.passed) {
-          console.log(`   Full   : FAIL — ${(fullFilter.failures || []).join('; ')}`);
+        if (fullFilter?.hqs) console.log(`   HQS    : ${fullFilter.hqs.score}/100`);
+        if (fullFilter?.rugcheck?.displayScore != null) {
+          console.log(`   RugCheck: ${fullFilter.rugcheck.displayScore}/100`);
         }
         console.log('══════════════════════════════\n');
-      }
-    } else if (
-      confirmPass
-      && q.passed
-      && fullFilter?.passed
-      && firstPassAlertMints.has(mint)
-      && !firstFullPassAlertMints.has(mint)
-    ) {
-      firstFullPassAlertMints.add(mint);
-      safeAppendJsonl(eventsFile, {
-        ...observation,
-        type: 'full_pass_first',
-        entry_proxy_market_cap_usd: q.marketCapUsd,
-      });
-      await sendPassTelegram(observation, fullFilter, 'full PASS');
-      if (verbose) {
-        console.log(`\n🟢 Full Jupiter PASS → Telegram follow-up: ${observation.symbol || '?'} ${mint.slice(0, 8)}...\n`);
       }
     }
 
@@ -588,16 +568,16 @@ async function scanOnce() {
     observed_at_iso: observedAtIso,
     tracked: coins.length,
     quick_pass: quickPassCount,
+    rules_pass: rulesPassCount,
     quick_fail: coins.length - quickPassCount,
-    new_quick_pass: newPassCount,
+    new_rules_pass: newPassCount,
     unique_seen: seenMints.size,
-    unique_quick_pass: firstPassAlertMints.size,
-    unique_full_pass: firstFullPassAlertMints.size,
+    unique_rules_pass: firstTelegramPassMints.size,
   };
   safeAppendJsonl(eventsFile, summary);
 
   if (verbose) {
-    console.log(`\n[${observedAtIso}] tick #${tick} | tracked=${coins.length} | quick PASS=${quickPassCount} | FAIL=${coins.length - quickPassCount}`);
+    console.log(`\n[${observedAtIso}] tick #${tick} | tracked=${coins.length} | quick PASS=${quickPassCount} | ✓ rules PASS=${rulesPassCount} | FAIL=${coins.length - quickPassCount}`);
     console.log('── Semua token dianalisa (CA lengkap) ──');
     for (const r of analyzed) {
       const status = r.pass ? '✓ PASS' : (r.quickOnlyPass ? '◐ QUICK' : '✗ FAIL');
@@ -610,9 +590,9 @@ async function scanOnce() {
     if (!quickPassCount && tick === 1) {
       console.log('\n(tidak ada token yang lulus quick filter saat ini — monitor terus…)\n');
     }
-    console.log(`[graduated] tick #${tick} complete | new_pass_this_tick=${newPassCount}`);
+    console.log(`[graduated] tick #${tick} complete | new_rules_pass_this_tick=${newPassCount}`);
   } else if (!quiet) {
-    console.log(`[collect] tick=${tick} tracked=${coins.length} quick_pass=${quickPassCount} new_pass=${newPassCount} unique_pass=${firstPassAlertMints.size}`);
+    console.log(`[collect] tick=${tick} tracked=${coins.length} quick_pass=${quickPassCount} rules_pass=${rulesPassCount} new_telegram=${newPassCount}`);
   }
 }
 
@@ -643,8 +623,7 @@ function writeSummary(stopReason) {
     tick_count: tick,
     total_observations: totalObservations,
     unique_seen: seenMints.size,
-    unique_quick_pass: firstPassAlertMints.size,
-    unique_full_pass: firstFullPassAlertMints.size,
+    unique_rules_pass: firstTelegramPassMints.size,
     total_full_checks: totalFullChecks,
     total_full_check_errors: totalFullCheckErrors,
     files: session.files,
@@ -668,7 +647,7 @@ async function sendFinalArtifacts(stopReason) {
     `Ticks: <b>${summary.tick_count}</b>`,
     `Observations: <b>${summary.total_observations}</b>`,
     `Unique seen: <b>${summary.unique_seen}</b>`,
-    `Unique quick PASS: <b>${summary.unique_quick_pass}</b>`,
+    `Unique rules PASS (Telegram): <b>${summary.unique_rules_pass}</b>`,
     `Full checks: <b>${summary.total_full_checks}</b>`,
     '',
     'Sending JSON/JSONL artifacts now.',
