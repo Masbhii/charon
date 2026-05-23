@@ -130,14 +130,14 @@ export function computeHolderQualityScore(candidate) {
 export function filterCandidate(candidate) {
   const strat = activeStrategy();
   const failures = [];
-  const mcap = candidate.metrics.marketCapUsd;
-  const totalFees = candidate.metrics.gmgnTotalFeesSol;
-  const gradVolume = candidate.metrics.graduatedVolumeUsd;
-  const vol1h = candidate.metrics.volume1hUsd;
-  const maxHolder = candidate.holders.maxHolderPercent;
+  const mcap = candidate.metrics?.marketCapUsd;
+  const totalFees = Number(candidate.metrics?.gmgnTotalFeesSol ?? 0);
+  const gradVolume = Number(candidate.metrics?.graduatedVolumeUsd ?? 0);
+  const vol1h = candidate.metrics?.volume1hUsd;
+  const maxHolder = candidate.holders?.maxHolderPercent;
   const rawTop4 = candidate.holders?.top4HolderCombinedPercent;
   const top4Combined = rawTop4 == null ? null : Number(rawTop4);
-  const savedCount = candidate.savedWalletExposure.holderCount;
+  const savedCount = Number(candidate.savedWalletExposure?.holderCount ?? 0);
   const feeSol = candidate.feeClaim?.distributedSol;
   const holderCount = Number(candidate.metrics.holderCount || 0);
   const trendingVolume = Number(candidate.trending?.volume ?? 0);

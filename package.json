@@ -9,7 +9,9 @@
     "screening:start": "node scripts/graduate-screening-daemon.mjs start",
     "screening:stop": "node scripts/graduate-screening-daemon.mjs stop",
     "screening:status": "node scripts/graduate-screening-daemon.mjs status",
-    "screening:log": "node scripts/graduate-screening-daemon.mjs log"
+    "screening:log": "node scripts/graduate-screening-daemon.mjs log",
+    "test:rugcheck": "node scripts/test-rugcheck-logic.mjs",
+    "test:rugcheck:api": "node scripts/test-rugcheck-api.mjs"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
