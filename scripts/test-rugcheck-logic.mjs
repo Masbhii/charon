@@ -87,7 +87,7 @@ const { strategyById, setActiveStrategy } = await import('../src/db/settings.js'
 const { filterCandidate } = await import('../src/pipeline/candidateBuilder.js');
 initDb();
 setActiveStrategy('graduate_immediate');
-assert(strategyById('graduate_immediate').min_rugcheck_score === 55, 'DB min_rugcheck_score is 55');
+assert(strategyById('graduate_immediate').min_rugcheck_score === 40, 'DB min_rugcheck_score is 40 (degen)');
 
 const base = {
   token: { mint: 'TestMint1111111111111111111111111111111111' },

@@ -22,6 +22,7 @@ function argNumber(name, fallback) {
 }
 
 const printOnly = args.includes('--print-only');
+const rugcheckOnly = args.includes('--rugcheck-only');
 
 const { initDb } = await import('../src/db/connection.js');
 const { strategyById, updateStrategyConfig } = await import('../src/db/settings.js');
@@ -34,25 +35,30 @@ if (!current) {
   process.exit(1);
 }
 
-const next = {
-  ...current,
-  min_graduated_age_ms: argNumber('--min-age-ms', 20_000),
-  max_graduated_age_ms: argNumber('--max-age-ms', 600_000),
-  min_mcap_usd: argNumber('--min-mcap', 34_000),
-  max_mcap_usd: argNumber('--max-mcap', 80_000),
-  min_liquidity_usd: argNumber('--min-liquidity', 5_000),
-  min_holders: argNumber('--min-holders', 50),
-  min_holders_grace_ms: argNumber('--min-holders-grace-ms', 180_000),
-  max_top20_holder_percent: argNumber('--max-top-holder-pct', 35),
-  min_volume_1h_usd: argNumber('--min-volume-1h', 0),
-  max_volume_1h_usd: argNumber('--max-volume-1h', 0),
-  max_bundle_single_holder_percent: argNumber('--max-bundle-single', 80),
-  max_bundle_top4_combined_percent: argNumber('--max-bundle-top4', 95),
-  duplicate_ticker_og_window_ms: argNumber('--duplicate-window-ms', 7_200_000),
-  min_holder_quality_score: argNumber('--min-hqs', 40),
-  min_rugcheck_score: argNumber('--min-rugcheck', 55),
-  partial_tp_sell_percent: argNumber('--partial-tp-sell', 80),
-};
+const next = rugcheckOnly
+  ? {
+      ...current,
+      min_rugcheck_score: argNumber('--min-rugcheck', 40),
+    }
+  : {
+      ...current,
+      min_graduated_age_ms: argNumber('--min-age-ms', 20_000),
+      max_graduated_age_ms: argNumber('--max-age-ms', 600_000),
+      min_mcap_usd: argNumber('--min-mcap', 34_000),
+      max_mcap_usd: argNumber('--max-mcap', 80_000),
+      min_liquidity_usd: argNumber('--min-liquidity', 5_000),
+      min_holders: argNumber('--min-holders', 50),
+      min_holders_grace_ms: argNumber('--min-holders-grace-ms', 180_000),
+      max_top20_holder_percent: argNumber('--max-top-holder-pct', 35),
+      min_volume_1h_usd: argNumber('--min-volume-1h', 0),
+      max_volume_1h_usd: argNumber('--max-volume-1h', 0),
+      max_bundle_single_holder_percent: argNumber('--max-bundle-single', 80),
+      max_bundle_top4_combined_percent: argNumber('--max-bundle-top4', 95),
+      duplicate_ticker_og_window_ms: argNumber('--duplicate-window-ms', 7_200_000),
+      min_holder_quality_score: argNumber('--min-hqs', 40),
+      min_rugcheck_score: argNumber('--min-rugcheck', 40),
+      partial_tp_sell_percent: argNumber('--partial-tp-sell', 80),
+    };
 
 delete next.id;
 delete next.name;

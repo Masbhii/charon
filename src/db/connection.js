@@ -408,7 +408,7 @@ export function initDb() {
     max_graduated_age_ms: 600_000,
     min_liquidity_usd: 5_000,
     min_holder_quality_score: 40,
-    min_rugcheck_score: 55,
+    min_rugcheck_score: 40,
     position_size_sol: 0.1,
     max_open_positions: 2,
     tp_percent: 120,
@@ -462,7 +462,7 @@ export function initDb() {
   patchGraduateImmediateStrategyConfig();
 }
 
-/** Merge new graduate_immediate keys into existing DB rows (INSERT OR IGNORE does not update). */
+/** Add missing keys only — does not overwrite existing filter/TP rules on VPS DB. */
 function patchGraduateImmediateStrategyConfig() {
   const row = db.prepare("SELECT config_json FROM strategies WHERE id = 'graduate_immediate'").get();
   if (!row?.config_json) return;
@@ -472,33 +472,20 @@ function patchGraduateImmediateStrategyConfig() {
   } catch {
     return;
   }
-  const patches = {
-    min_graduated_age_ms: 20_000,
-    max_graduated_age_ms: 600_000,
-    min_mcap_usd: 34_000,
-    max_mcap_usd: 80_000,
-    min_liquidity_usd: 5_000,
-    min_holders: 50,
+  const missingOnly = {
+    min_rugcheck_score: 40,
     min_holders_grace_ms: 180_000,
-    max_top20_holder_percent: 35,
-    min_holder_quality_score: 40,
-    min_rugcheck_score: 55,
-    partial_tp_sell_percent: 80,
-    moonbag_on_partial_tp: true,
-    trailing_enabled: true,
-    trailing_percent: 20,
-    early_trail_arm_pct: 15,
   };
   let changed = false;
-  for (const [key, value] of Object.entries(patches)) {
-    if (config[key] !== value) {
+  for (const [key, value] of Object.entries(missingOnly)) {
+    if (config[key] === undefined || config[key] === null) {
       config[key] = value;
       changed = true;
     }
   }
   if (changed) {
     db.prepare("UPDATE strategies SET config_json = ? WHERE id = 'graduate_immediate'").run(JSON.stringify(config));
-    console.log('[db] patched graduate_immediate strategy config');
+    console.log('[db] patched graduate_immediate (additive keys only)');
   }
 }
 
