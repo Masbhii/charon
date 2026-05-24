@@ -411,7 +411,7 @@ export function initDb() {
     min_liquidity_usd: 5_000,
     min_holder_quality_score: 40,
     min_rugcheck_score: 0,
-    rugcheck_max_risk_level: 'good',
+    rugcheck_max_risk_level: 'warn',
     position_size_sol: 0.1,
     max_open_positions: 0,
     tp_percent: 120,
@@ -494,7 +494,7 @@ function patchGraduateImmediateStrategyConfig() {
   }
   const missingOnly = {
     min_rugcheck_score: 0,
-    rugcheck_max_risk_level: 'good',
+    rugcheck_max_risk_level: 'warn',
     min_holders_grace_ms: 180_000,
     duplicate_ticker_og_window_ms: 600_000,
   };
@@ -521,6 +521,12 @@ function patchGraduateImmediateStrategyConfig() {
   }
   // Force-fix: rugcheck score_normalised ~16 for ALL Pump graduated tokens (LP locked 100%)
   // Threshold 40 rejects every safe token — disable it (0 = off)
+  // Force-fix: rugcheck level 'good' is too strict for Pump graduated tokens
+  // "Low amount of LP Providers" (warn) is normal — only reject Danger
+  if (config.rugcheck_max_risk_level === 'good') {
+    config.rugcheck_max_risk_level = 'warn';
+    changed = true;
+  }
   if (config.min_rugcheck_score > 0) {
     config.min_rugcheck_score = 0;
     changed = true;
