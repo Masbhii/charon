@@ -411,6 +411,7 @@ export function initDb() {
     min_liquidity_usd: 5_000,
     min_holder_quality_score: 40,
     min_rugcheck_score: 0,
+    rugcheck_max_risk_level: 'good',
     position_size_sol: 0.1,
     max_open_positions: 0,
     tp_percent: 120,
@@ -493,6 +494,7 @@ function patchGraduateImmediateStrategyConfig() {
   }
   const missingOnly = {
     min_rugcheck_score: 0,
+    rugcheck_max_risk_level: 'good',
     min_holders_grace_ms: 180_000,
     duplicate_ticker_og_window_ms: 600_000,
   };

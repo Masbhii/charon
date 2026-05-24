@@ -34,7 +34,7 @@ export async function refreshCandidateForExecution(row) {
   const mint = candidate.token.mint;
   const strat = strategyById(activeStrategy()?.id);
   const fastMigrate = strat?.id === 'graduate_immediate';
-  const needRugcheck = RUGCHECK_ENABLED && Number(strat?.min_rugcheck_score ?? 0) > 0;
+  const needRugcheck = RUGCHECK_ENABLED && (Number(strat?.min_rugcheck_score ?? 0) > 0 || (strat?.rugcheck_max_risk_level && strat?.rugcheck_max_risk_level !== 'off'));
   const [gmgn, asset, holders, chart, rugcheck] = await Promise.all([
     fetchGmgnTokenInfo(mint, false),
     fetchJupiterAsset(mint, { useCache: false }),

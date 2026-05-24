@@ -90,21 +90,52 @@ export async function fetchRugcheckSummary(mint, { useCache = true, ttlMs = RUGC
   }
 }
 
-export function rugcheckFilterFailure(candidate, minScore) {
+/**
+ * Check rugcheck data against strategy filters.
+ * @param {object} candidate - candidate with .rugcheck property
+ * @param {number} minScore - legacy numeric threshold (0 = disabled). Higher = stricter.
+ * @param {string|null} maxRiskLevel - text-based filter: 'good' | 'warn' | 'danger' | 'off' | null
+ *   'good'   → only "Good" passes, "Warn"/"Danger" rejected
+ *   'warn'   → "Good" and "Warn" pass, "Danger" rejected
+ *   'danger' → everything passes (effectively disabled)
+ *   'off'/null → text filter disabled, fall through to numeric check
+ */
+export function rugcheckFilterFailure(candidate, minScore, maxRiskLevel = null) {
   const rc = candidate?.rugcheck;
-  if (!minScore || minScore <= 0) return null;
+  const hasNumericFilter = minScore && minScore > 0;
+  const hasLevelFilter = maxRiskLevel && maxRiskLevel !== 'off' && maxRiskLevel !== 'danger';
+
+  // Both filters disabled → pass
+  if (!hasNumericFilter && !hasLevelFilter) return null;
+
   if (!rc) {
     return RUGCHECK_FAIL_OPEN ? null : 'rugcheck: no data';
   }
   if (rc.unavailable) {
     return RUGCHECK_FAIL_OPEN ? null : `rugcheck: unavailable (${rc.reason || 'error'})`;
   }
-  if (rc.displayScore == null) {
-    return RUGCHECK_FAIL_OPEN ? null : 'rugcheck: score missing';
+
+  // Risk level check (text-based, primary — more reliable than numeric score)
+  if (hasLevelFilter && rc.riskLevel) {
+    const LEVEL_ORDER = { good: 0, warn: 1, warning: 1, danger: 2 };
+    const maxAllowed = LEVEL_ORDER[String(maxRiskLevel).toLowerCase()] ?? 2;
+    const actual = LEVEL_ORDER[String(rc.riskLevel).toLowerCase()];
+    if (actual != null && actual > maxAllowed) {
+      const flags = rc.riskFlags?.length ? ` (${rc.riskFlags.join(', ')})` : '';
+      return `rugcheck: ${rc.riskLevel} > max allowed ${maxRiskLevel}${flags}`;
+    }
   }
-  if (rc.displayScore < minScore) {
-    const flags = rc.riskFlags?.length ? ` (${rc.riskFlags.join(', ')})` : '';
-    return `rugcheck: ${rc.displayScore}/100 < ${minScore}${flags}`;
+
+  // Numeric score check (legacy fallback, only if minScore > 0)
+  if (hasNumericFilter) {
+    if (rc.displayScore == null) {
+      return RUGCHECK_FAIL_OPEN ? null : 'rugcheck: score missing';
+    }
+    if (rc.displayScore < minScore) {
+      const flags = rc.riskFlags?.length ? ` (${rc.riskFlags.join(', ')})` : '';
+      return `rugcheck: ${rc.displayScore}/100 < ${minScore}${flags}`;
+    }
   }
+
   return null;
 }

@@ -243,7 +243,7 @@ export function filterCandidate(candidate, stratOverride = null) {
     }
   }
 
-  const rugFail = rugcheckFilterFailure(candidate, strat.min_rugcheck_score);
+  const rugFail = rugcheckFilterFailure(candidate, strat.min_rugcheck_score, strat.rugcheck_max_risk_level);
   if (rugFail) failures.push(rugFail);
 
   // Top holder concentration (legacy single-wallet cap)
@@ -303,7 +303,7 @@ function isFastMigrateEnrichment(route, strat) {
 export async function buildCandidate({ mint, fee = null, signature = null, graduatedCoin = null, trendingToken = null, route }) {
   const strat = strategyForSignals({ route, mint, graduatedCoin, trendingToken });
   const fastMigrate = isFastMigrateEnrichment(route, strat);
-  const needRugcheck = RUGCHECK_ENABLED && Number(strat.min_rugcheck_score ?? 0) > 0;
+  const needRugcheck = RUGCHECK_ENABLED && (Number(strat.min_rugcheck_score ?? 0) > 0 || (strat.rugcheck_max_risk_level && strat.rugcheck_max_risk_level !== 'off'));
   const rugcheckPromise = needRugcheck ? fetchRugcheckSummary(mint) : Promise.resolve(null);
   let gmgn;
   let jupiterAsset;
