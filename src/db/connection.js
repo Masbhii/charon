@@ -507,6 +507,16 @@ function patchGraduateImmediateStrategyConfig() {
     config.duplicate_ticker_og_window_ms = 600_000;
     changed = true;
   }
+  // Force-fix: graduate_immediate must NEVER require fee claim
+  // Fee claim data isn't available when GMGN is disabled (which is the expected mode)
+  if (config.require_fee_claim === true || config.require_fee_claim === undefined) {
+    config.require_fee_claim = false;
+    changed = true;
+  }
+  if (config.min_fee_claim_sol > 0) {
+    config.min_fee_claim_sol = 0;
+    changed = true;
+  }
   if (changed) {
     db.prepare("UPDATE strategies SET config_json = ? WHERE id = 'graduate_immediate'").run(JSON.stringify(config));
     console.log('[db] patched graduate_immediate (additive keys only)');
