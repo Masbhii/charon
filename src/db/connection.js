@@ -387,7 +387,7 @@ export function initDb() {
     min_source_count: 1,
     require_fee_claim: false,
     token_age_max_ms: 900_000,
-    min_mcap_usd: 30_000,
+    min_mcap_usd: 34_000,
     max_mcap_usd: 80_000,
     min_fee_claim_sol: 0,
     min_gmgn_total_fee_sol: 0,
@@ -523,12 +523,6 @@ function patchGraduateImmediateStrategyConfig() {
   // Threshold 40 rejects every safe token — disable it (0 = off)
   if (config.min_rugcheck_score > 0) {
     config.min_rugcheck_score = 0;
-    changed = true;
-  }
-  // Force-fix: mcap floor — Jupiter reports 10-15% lower than Pump API
-  // Token at $34.7K on Pump shows $31.2K on Jupiter → false reject at $34K threshold
-  if (config.min_mcap_usd > 30_000) {
-    config.min_mcap_usd = 30_000;
     changed = true;
   }
   if (changed) {
