@@ -387,7 +387,7 @@ export function initDb() {
     min_source_count: 1,
     require_fee_claim: false,
     token_age_max_ms: 900_000,
-    min_mcap_usd: 34_000,
+    min_mcap_usd: 30_000,
     max_mcap_usd: 80_000,
     min_fee_claim_sol: 0,
     min_gmgn_total_fee_sol: 0,
@@ -410,7 +410,7 @@ export function initDb() {
     max_graduated_age_ms: 600_000,
     min_liquidity_usd: 5_000,
     min_holder_quality_score: 40,
-    min_rugcheck_score: 40,
+    min_rugcheck_score: 0,
     position_size_sol: 0.1,
     max_open_positions: 0,
     tp_percent: 120,
@@ -492,7 +492,7 @@ function patchGraduateImmediateStrategyConfig() {
     return;
   }
   const missingOnly = {
-    min_rugcheck_score: 40,
+    min_rugcheck_score: 0,
     min_holders_grace_ms: 180_000,
     duplicate_ticker_og_window_ms: 600_000,
   };
@@ -515,6 +515,18 @@ function patchGraduateImmediateStrategyConfig() {
   }
   if (config.min_fee_claim_sol > 0) {
     config.min_fee_claim_sol = 0;
+    changed = true;
+  }
+  // Force-fix: rugcheck score_normalised ~16 for ALL Pump graduated tokens (LP locked 100%)
+  // Threshold 40 rejects every safe token — disable it (0 = off)
+  if (config.min_rugcheck_score > 0) {
+    config.min_rugcheck_score = 0;
+    changed = true;
+  }
+  // Force-fix: mcap floor — Jupiter reports 10-15% lower than Pump API
+  // Token at $34.7K on Pump shows $31.2K on Jupiter → false reject at $34K threshold
+  if (config.min_mcap_usd > 30_000) {
+    config.min_mcap_usd = 30_000;
     changed = true;
   }
   if (changed) {
