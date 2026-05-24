@@ -35,9 +35,27 @@ export function summarizeRugcheckReport(report) {
   const riskNames = risks
     .map(r => String(r?.name || r?.title || r?.description || '').trim())
     .filter(Boolean);
+
+  // Derive riskLevel: prefer top-level field, then compute from individual risk levels
+  let riskLevel = report.riskLevel ?? report.risk_level ?? null;
+  if (!riskLevel && risks.length > 0) {
+    const levels = risks.map(r => String(r?.level || '').toLowerCase()).filter(Boolean);
+    if (levels.some(l => l === 'danger' || l === 'critical' || l === 'high')) {
+      riskLevel = 'Danger';
+    } else if (levels.some(l => l === 'warn' || l === 'warning' || l === 'medium')) {
+      riskLevel = 'Warn';
+    } else {
+      riskLevel = 'Good';
+    }
+  }
+  // Fallback: if no riskLevel and no risks array but we have creatorHistoryRug, mark Danger
+  if (!riskLevel && riskNames.some(n => /creator history of rugged/i.test(n))) {
+    riskLevel = 'Danger';
+  }
+
   return {
     displayScore,
-    riskLevel: report.riskLevel ?? report.risk_level ?? null,
+    riskLevel,
     rugged: Boolean(report.rugged),
     lpLockedPct: Number(report.lpLockedPct ?? report.lp_locked_pct ?? NaN),
     topHoldersPct: Number(report.topHoldersPct ?? report.top_holders_pct ?? NaN),
@@ -116,13 +134,22 @@ export function rugcheckFilterFailure(candidate, minScore, maxRiskLevel = null) 
   }
 
   // Risk level check (text-based, primary — more reliable than numeric score)
-  if (hasLevelFilter && rc.riskLevel) {
-    const LEVEL_ORDER = { good: 0, warn: 1, warning: 1, danger: 2 };
-    const maxAllowed = LEVEL_ORDER[String(maxRiskLevel).toLowerCase()] ?? 2;
-    const actual = LEVEL_ORDER[String(rc.riskLevel).toLowerCase()];
-    if (actual != null && actual > maxAllowed) {
-      const flags = rc.riskFlags?.length ? ` (${rc.riskFlags.join(', ')})` : '';
-      return `rugcheck: ${rc.riskLevel} > max allowed ${maxRiskLevel}${flags}`;
+  if (hasLevelFilter) {
+    // Hard reject: creator with history of rugged tokens = automatic Danger
+    if (rc.creatorHistoryRug) {
+      return `rugcheck: creator history of rugged tokens`;
+    }
+    if (rc.riskLevel) {
+      const LEVEL_ORDER = { good: 0, warn: 1, warning: 1, danger: 2 };
+      const maxAllowed = LEVEL_ORDER[String(maxRiskLevel).toLowerCase()] ?? 2;
+      const actual = LEVEL_ORDER[String(rc.riskLevel).toLowerCase()];
+      if (actual != null && actual > maxAllowed) {
+        const flags = rc.riskFlags?.length ? ` (${rc.riskFlags.join(', ')})` : '';
+        return `rugcheck: ${rc.riskLevel} > max allowed ${maxRiskLevel}${flags}`;
+      }
+    } else {
+      // riskLevel missing — fail-closed unless RUGCHECK_FAIL_OPEN
+      return RUGCHECK_FAIL_OPEN ? null : 'rugcheck: risk level unknown';
     }
   }
 
